@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Geolava — Input showcase</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,200;9..40,300;9..40,400;9..40,700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; font-family: 'DM Sans', sans-serif; }
+
+  /* blank canvas, input centered, whole component scaled up 20% */
+  body {
+    background: #FEFEFC;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .showcase-stage {
+    width: 662px;
+    transform: scale(1.2);
+    transform-origin: center center;
+  }
+
+  /* ── Chat input ── */
+  .home-chat {
+    max-width: 662px;
+    margin: 0 auto;
+    background: #FEFEFB;
+    border: 1px solid #BEBEBD;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    gap: 0;
+    padding: 14px 16px;
+    position: relative;
+    z-index: 2;
+    transition: border-color 0.15s ease;
+  }
+  .chat-tools { margin-right: 12px; }
+  /* black stroke only when the text input itself is focused
+     (not when the + button / add menu takes focus) */
+  .home-chat.input-active { border-color: #282823; }
+
+  /* Send button — circular; fades in/out by opacity once there's text */
+  .home-send {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    margin-left: 12px;
+    padding: 0;
+    border: none;
+    background: #6266E6;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease, filter 0.15s ease;
+  }
+  .home-send:hover { filter: brightness(0.95); }
+  .home-send img { display: block; }
+  .home-chat.has-text .home-send {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .chat-icon-btn {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    border: none;
+    background: #F7F6F1;
+    border-radius: 43px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .chat-icon-btn.bare { background: none; }
+  .chat-icon-btn:hover { background: #EEEDEA; }
+  .chat-icon-btn.bare:hover { background: #F7F6F1; }
+  .chat-icon-btn svg { display: block; }
+
+  /* add ⟷ close blur crossfade */
+  .icon-swap {
+    position: relative;
+    width: 16px;
+    height: 16px;
+  }
+  .icon-swap img {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    transition: opacity 0.26s ease, filter 0.26s ease;
+  }
+  .icon-add { opacity: 1; filter: blur(0); }
+  .icon-close { width: 11px; height: 11px; opacity: 0; filter: blur(3px); }
+  #add-btn[aria-expanded="true"] .icon-add { opacity: 0; filter: blur(3px); }
+  #add-btn[aria-expanded="true"] .icon-close { opacity: 1; filter: blur(0); }
+
+  /* add-button group (add btn + tool chips) */
+  .chat-tools {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  #add-btn { position: relative; z-index: 2; }  /* sits above the chip as it emerges */
+
+  /* Draw chip — slides out from under the add button */
+  .draw-chip-slot {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    max-width: 0;
+    margin-left: 0;
+    opacity: 0;
+    overflow: hidden;
+    transform: translateX(-14px);
+    transition: max-width 0.34s cubic-bezier(0.175, 0.885, 0.32, 1.1),
+                margin-left 0.34s cubic-bezier(0.175, 0.885, 0.32, 1.1),
+                transform 0.34s cubic-bezier(0.175, 0.885, 0.32, 1.1),
+                opacity 0.24s ease;
+  }
+  .draw-chip-slot.show {
+    max-width: 44px;
+    margin-left: 8px;
+    opacity: 1;
+    transform: translateX(0);
+  }
+  .draw-chip {
+    background: rgba(98, 102, 230, 0.2);
+    border: none;
+    border-radius: 43px;
+    padding: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.15s;
+  }
+  .draw-chip:hover { background: rgba(98, 102, 230, 0.32); }
+  .draw-chip img { display: block; }
+
+  /* pencil ⟷ close crossfade on hover */
+  .draw-chip-swap { position: relative; width: 12px; height: 12px; display: block; }
+  .draw-chip-swap > * {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    transition: opacity 0.18s ease;
+  }
+  .draw-chip-close { opacity: 0; }
+  .draw-chip:hover .draw-chip-pencil { opacity: 0; }
+  .draw-chip:hover .draw-chip-close { opacity: 1; }
+
+  /* ── Area pills row ── */
+  .area-pills-row {
+    position: relative;
+    z-index: 1;
+    max-width: 662px;
+    margin: 0 auto -10px;
+    background: #F7F6F1;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: 10px 10px 0 0;
+    opacity: 0.5;
+    transform: translateY(16px);
+    /* disappearance */
+    transition: transform 0.2s ease-in,
+                opacity 0.2s ease-in,
+                border-color 0.2s ease-in;
+  }
+  .area-pills-row.has-pills {
+    opacity: 1;
+    transform: translateY(0);
+    border-color: #BEBEBD;
+    /* appearance — snappy */
+    transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+                opacity 0.4s ease,
+                border-color 0.4s ease;
+  }
+  /* padding-free wrapper whose max-height animates (collapses to a true 0) */
+  .area-pills-inner {
+    overflow: hidden;
+    max-height: 0;
+    transition: max-height 0.2s ease-in;                          /* disappearance */
+  }
+  .area-pills-row.has-pills .area-pills-inner {
+    transition: max-height 0.4s cubic-bezier(0.16, 1, 0.3, 1);     /* appearance */
+  }
+  .area-pills-content {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 16px 20px;
+  }
+
+  .area-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    padding: 8px 12px;
+    background: transparent;
+    border: 1px solid #BEBEBD;
+    border-radius: 6px;
+    color: #282823;                 /* drives icon + text + (selected) border */
+    font-family: 'DM Sans', sans-serif;
+    white-space: nowrap;
+    flex-shrink: 0;
+    cursor: pointer;
+    overflow: hidden;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .area-pill:hover { border-color: #282823; }   /* hover → black border */
+  .area-pill.selected {
+    color: #6266E6;
+    border-color: #6266E6;          /* completely purple, no fill (wins over hover) */
+  }
+
+  /* leading zone marker (always visible) */
+  .area-pill-zone-icon {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    margin-right: 4px;
+    color: inherit;
+  }
+  .area-pill-zone-icon svg { display: block; width: 16px; height: 16px; color: inherit; }
+
+  .area-pill-label {
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 16px;
+    color: inherit;
+  }
+
+  /* close × — appears to the RIGHT on hover, growing the pill width */
+  .area-pill-x {
+    flex-shrink: 0;
+    border: none;
+    background: none;
+    padding: 0;
+    cursor: pointer;
+    color: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 12.8px;
+    height: 12.8px;
+    margin-left: 10px;
+    opacity: 1;            /* always visible, not only on hover */
+  }
+  .area-pill-x svg { display: block; width: 12.8px; height: 12.8px; color: inherit; flex-shrink: 0; }
+
+  /* ── Add popover ── */
+  .chat-add-wrap { position: static; flex-shrink: 0; }
+
+  .add-popover {
+    position: absolute;
+    bottom: calc(100% + 9px);   /* 8px visual gap above the input box (1px border) */
+    left: 0;                    /* aligned with the input's left edge */
+    background: #FEFEFB;
+    border: 1px solid #BEBEBD;
+    border-radius: 10px;
+    padding: 20px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 178px;
+    z-index: 30;
+    transform-origin: bottom left;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(8px) scale(0.97);
+    transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.22s;
+  }
+  .add-popover.open {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0) scale(1);
+  }
+
+  .add-popover-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 8px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    width: 100%;
+    border-radius: 6px;
+  }
+  .add-popover-item-text {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 16px;
+    color: #282423;
+    white-space: nowrap;
+  }
+  .add-popover-icon {
+    border: 1px solid #DFDFDE;
+    border-radius: 5px;
+    padding: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .add-popover-icon img { display: block; width: 14px; height: 14px; }
+  .add-popover-item:hover .add-popover-icon {
+    border-color: #BEBEBD;
+    background: #F7F6F1;
+  }
+
+  .add-popover-divider {
+    height: 1px;
+    width: 100%;
+    background: #DFDFDE;
+  }
+
+  .home-chat input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: none;
+    outline: none;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    font-weight: 400;
+    letter-spacing: -0.28px;
+    color: #282823;
+  }
+  .home-chat input::placeholder { color: #939391; }
+</style>
+</head>
+<body>
+
+  <div class="showcase-stage">
+    <!-- Area pills row -->
+    <div class="area-pills-row" id="area-pills-row"><div class="area-pills-inner" id="area-pills-inner"><div class="area-pills-content" id="area-pills-content"></div></div></div>
+
+    <!-- Chat input -->
+    <div class="home-chat">
+      <div class="chat-tools">
+        <div class="chat-add-wrap">
+          <button class="chat-icon-btn" id="add-btn" title="Add" aria-haspopup="true" aria-expanded="false">
+            <span class="icon-swap">
+              <img class="icon-add" src="Icons/add-square-dashboard.svg" width="16" height="16" alt="Add">
+              <img class="icon-close" src="Icons/popover-close.svg" width="14" height="14" alt="Close" aria-hidden="true">
+            </span>
+          </button>
+          <div class="add-popover" id="add-popover" role="menu">
+            <button class="add-popover-item" role="menuitem" data-action="add-file">
+              <span class="add-popover-icon"><img src="Icons/popover-add-file.svg" alt=""></span>
+              <span class="add-popover-item-text">Add file</span>
+            </button>
+            <div class="add-popover-divider"></div>
+            <button class="add-popover-item" role="menuitem" data-action="comment">
+              <span class="add-popover-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M23 11C23 5.38065 17.9734 1 12 1C6.02658 1 1 5.38065 1 11C1 13.4862 1.93896 16.1939 3.64022 18.0672C3.8042 18.2477 3.90234 18.3562 3.96986 18.4383C3.97966 18.4502 3.98777 18.4604 3.99441 18.4688C3.99461 18.4719 3.99481 18.4751 3.99501 18.4785C3.99961 18.5571 4 18.6653 4 18.8666L4 18.9346C3.99994 19.732 3.99989 20.4297 4.07185 20.969C4.14557 21.5217 4.32524 22.181 4.92493 22.6075C5.06379 22.7062 5.21365 22.7885 5.37151 22.8527C6.05323 23.1298 6.70596 22.9276 7.21182 22.6932C7.70555 22.4645 8.29424 22.09 8.96701 21.6621L9.87513 21.0845C10.0425 20.978 10.1301 20.9229 10.1958 20.8866C10.1979 20.8855 10.1999 20.8844 10.2018 20.8833C10.2089 20.8836 10.217 20.8839 10.2263 20.8844C10.3181 20.8893 10.4439 20.9028 10.6664 20.9272C11.1039 20.9753 11.549 21 12 21C17.9734 21 23 16.6193 23 11ZM12 3C17.0723 3 21 6.67822 21 11C21 15.3218 17.0723 19 12 19C11.622 19 11.2499 18.9793 10.8848 18.9392L10.8622 18.9367C10.6706 18.9156 10.488 18.8956 10.3333 18.8873C10.1684 18.8784 9.96608 18.8779 9.74947 18.9283C9.40921 19.0074 9.10851 19.2003 8.86839 19.3543C8.84565 19.3689 8.82345 19.3831 8.80181 19.3969L7.95107 19.938C7.20371 20.4133 6.72878 20.7128 6.37108 20.8785C6.24002 20.9393 6.15738 20.966 6.11053 20.9776C6.09517 20.9318 6.07338 20.8478 6.05428 20.7046C6.00215 20.3138 6 19.7523 6 18.8666C6 18.8401 6.0001 18.8128 6.00021 18.7848C6.00131 18.4965 6.00266 18.1395 5.89298 17.8179C5.87431 17.7631 5.85824 17.7215 5.83529 17.6685C5.74572 17.4617 5.6181 17.2938 5.51449 17.1678C5.41192 17.0431 5.27994 16.8978 5.13549 16.7388L5.12079 16.7226C3.78677 15.2536 3 13.0404 3 11C3 6.67822 6.92772 3 12 3Z" fill="#282823"/></svg></span>
+              <span class="add-popover-item-text">Comment</span>
+            </button>
+            <button class="add-popover-item" role="menuitem" data-action="draw">
+              <span class="add-popover-icon"><img src="Icons/popover-pencil.svg" alt=""></span>
+              <span class="add-popover-item-text">Draw the area</span>
+            </button>
+          </div>
+        </div>
+        <div class="draw-chip-slot" id="draw-chip-slot">
+          <button class="draw-chip" id="draw-chip" title="Drawing area — remove">
+            <span class="draw-chip-swap">
+              <img class="draw-chip-pencil" src="Icons/draw-chip-pencil.svg" width="12" height="12" alt="Draw area">
+              <svg class="draw-chip-close" width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true">
+                <path d="M1.5 1.5L9.5 9.5M9.5 1.5L1.5 9.5" stroke="#6266E6" stroke-width="1.6" stroke-linecap="round"/>
+              </svg>
+            </span>
+          </button>
+        </div>
+        <div class="draw-chip-slot" id="comment-chip-slot">
+          <button class="draw-chip" id="comment-chip" title="Commenting — remove">
+            <span class="draw-chip-swap">
+              <svg class="draw-chip-pencil" width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path fill-rule="evenodd" clip-rule="evenodd" d="M23 11C23 5.38065 17.9734 1 12 1C6.02658 1 1 5.38065 1 11C1 13.4862 1.93896 16.1939 3.64022 18.0672C3.8042 18.2477 3.90234 18.3562 3.96986 18.4383C3.97966 18.4502 3.98777 18.4604 3.99441 18.4688C3.99461 18.4719 3.99481 18.4751 3.99501 18.4785C3.99961 18.5571 4 18.6653 4 18.8666L4 18.9346C3.99994 19.732 3.99989 20.4297 4.07185 20.969C4.14557 21.5217 4.32524 22.181 4.92493 22.6075C5.06379 22.7062 5.21365 22.7885 5.37151 22.8527C6.05323 23.1298 6.70596 22.9276 7.21182 22.6932C7.70555 22.4645 8.29424 22.09 8.96701 21.6621L9.87513 21.0845C10.0425 20.978 10.1301 20.9229 10.1958 20.8866C10.1979 20.8855 10.1999 20.8844 10.2018 20.8833C10.2089 20.8836 10.217 20.8839 10.2263 20.8844C10.3181 20.8893 10.4439 20.9028 10.6664 20.9272C11.1039 20.9753 11.549 21 12 21C17.9734 21 23 16.6193 23 11ZM12 3C17.0723 3 21 6.67822 21 11C21 15.3218 17.0723 19 12 19C11.622 19 11.2499 18.9793 10.8848 18.9392L10.8622 18.9367C10.6706 18.9156 10.488 18.8956 10.3333 18.8873C10.1684 18.8784 9.96608 18.8779 9.74947 18.9283C9.40921 19.0074 9.10851 19.2003 8.86839 19.3543C8.84565 19.3689 8.82345 19.3831 8.80181 19.3969L7.95107 19.938C7.20371 20.4133 6.72878 20.7128 6.37108 20.8785C6.24002 20.9393 6.15738 20.966 6.11053 20.9776C6.09517 20.9318 6.07338 20.8478 6.05428 20.7046C6.00215 20.3138 6 19.7523 6 18.8666C6 18.8401 6.0001 18.8128 6.00021 18.7848C6.00131 18.4965 6.00266 18.1395 5.89298 17.8179C5.87431 17.7631 5.85824 17.7215 5.83529 17.6685C5.74572 17.4617 5.6181 17.2938 5.51449 17.1678C5.41192 17.0431 5.27994 16.8978 5.13549 16.7388L5.12079 16.7226C3.78677 15.2536 3 13.0404 3 11C3 6.67822 6.92772 3 12 3Z" fill="#6266E6"/>
+              </svg>
+              <svg class="draw-chip-close" width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true">
+                <path d="M1.5 1.5L9.5 9.5M9.5 1.5L1.5 9.5" stroke="#6266E6" stroke-width="1.6" stroke-linecap="round"/>
+              </svg>
+            </span>
+          </button>
+        </div>
+      </div>
+      <input type="text" id="home-chat-input" placeholder="What property are we looking for?">
+      <button class="home-send" id="home-send" type="button" title="Send" aria-label="Send">
+        <img src="Icons/send-arrow.svg" width="18" height="18" alt="">
+      </button>
+    </div>
+  </div>
+
+<script>
+  // ── Add popover ──
+  const addBtn = document.getElementById('add-btn');
+  const addPopover = document.getElementById('add-popover');
+
+  function setAddPopover(open) {
+    addPopover.classList.toggle('open', open);
+    addBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  addBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setAddPopover(!addPopover.classList.contains('open'));
+  });
+
+  const drawChipSlot = document.getElementById('draw-chip-slot');
+  const drawChip = document.getElementById('draw-chip');
+  const commentChipSlot = document.getElementById('comment-chip-slot');
+  const commentChip = document.getElementById('comment-chip');
+
+  // clicking the comment chip cancels comment mode
+  commentChip.addEventListener('click', (e) => {
+    e.stopPropagation();
+    commentChipSlot.classList.remove('show');
+  });
+
+  addPopover.querySelectorAll('.add-popover-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const action = item.dataset.action;
+      setAddPopover(false);
+      if (action === 'draw') {
+        commentChipSlot.classList.remove('show');
+        drawChipSlot.classList.add('show');
+        addAreaPill(++areaCount);     // show a freshly-drawn zone pill
+      } else if (action === 'comment') {
+        drawChipSlot.classList.remove('show');
+        commentChipSlot.classList.add('show');
+      } else {
+        document.getElementById('home-chat-input').focus();
+      }
+    });
+  });
+
+  // Click the draw chip to cancel drawing / remove it
+  drawChip.addEventListener('click', (e) => {
+    e.stopPropagation();
+    drawChipSlot.classList.remove('show');
+  });
+
+  // Close on outside click or Escape
+  document.addEventListener('click', (e) => {
+    if (!addPopover.contains(e.target) && e.target !== addBtn) setAddPopover(false);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') setAddPopover(false);
+  });
+
+  // ── Chat input: reveal send button when there's text ──
+  const homeChat = document.querySelector('.home-chat');
+  const homeInput = document.getElementById('home-chat-input');
+  const homeSend = document.getElementById('home-send');
+
+  homeInput.addEventListener('input', () => {
+    homeChat.classList.toggle('has-text', homeInput.value.trim().length > 0);
+  });
+  homeInput.addEventListener('focus', () => homeChat.classList.add('input-active'));
+  homeInput.addEventListener('blur', () => homeChat.classList.remove('input-active'));
+
+  function sendHome() {
+    if (!homeInput.value.trim()) return;
+    homeInput.value = '';
+    homeChat.classList.remove('has-text');
+  }
+  homeSend.addEventListener('click', sendHome);
+
+  homeInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') sendHome();
+    // "/" on an empty input opens the modes popover (slash-command)
+    if (e.key === '/' && !homeInput.value.trim()) {
+      e.preventDefault();
+      setAddPopover(true);
+    }
+  });
+
+  // ── Area pills (appearance + removal) ──
+  const areaPillsRow = document.getElementById('area-pills-row');
+  const areaPillsInner = document.getElementById('area-pills-inner');
+  const areaPillsContent = document.getElementById('area-pills-content');
+  let areaCount = 0;
+  let activeAreaId = null;
+
+  function addAreaPill(num) {
+    const id = 'area-' + num;
+    const pill = document.createElement('div');
+    pill.className = 'area-pill';
+    pill.dataset.areaId = id;
+    pill.setAttribute('role', 'button');
+    pill.innerHTML = `
+      <span class="area-pill-zone-icon" aria-hidden="true">
+        <svg viewBox="0 0 16 16" fill="none"><path d="M8.38825 1.51009C10.8747 1.41482 13.4612 3.13899 13.7867 6.3864C13.9311 7.82784 13.3847 9.23162 12.6356 10.4274C11.8817 11.6309 10.879 12.6934 9.99307 13.4801C9.1102 14.264 7.81516 14.0075 7.18187 13.1149L5.07575 10.1462C4.99003 10.0254 4.83279 9.97817 4.69489 10.0322C3.81036 10.3797 2.8153 9.91306 2.51716 9.01075L1.30231 5.33236C0.959405 4.29393 1.514 3.15776 2.57901 2.82715C3.36328 2.58377 4.42203 2.2717 5.47224 2.0127C6.50918 1.75697 7.58595 1.54087 8.38825 1.51009ZM8.43968 2.84213C7.78322 2.86728 6.81914 3.05347 5.79125 3.30697C4.77646 3.55724 3.7455 3.86123 2.97419 4.10059C2.64196 4.20379 2.45272 4.56356 2.56859 4.91439L3.78343 8.59213C3.84147 8.76785 4.03502 8.85901 4.20726 8.79134C4.91561 8.51311 5.72254 8.75342 6.16299 9.37403L8.26976 12.3434C8.49438 12.6599 8.8826 12.6838 9.1083 12.4834C9.9323 11.7517 10.8395 10.7838 11.5061 9.71973C12.1776 8.64781 12.5628 7.54593 12.4599 6.51921C12.2105 4.03189 10.283 2.77157 8.43968 2.84213Z" fill="currentColor"/></svg>
+      </span>
+      <span class="area-pill-label">Zone ${num}</span>
+      <button class="area-pill-x" type="button" title="Remove area" aria-label="Remove area">
+        <svg viewBox="0 0 15.4141 15.4141" fill="none"><path d="M15.4141 1.41406L9.12109 7.70703L15.4141 14L14 15.4141L7.70703 9.12109L1.41406 15.4141L0 14L6.29297 7.70703L0 1.41406L1.41406 0L7.70703 6.29297L14 0L15.4141 1.41406Z" fill="currentColor"/></svg>
+      </button>
+    `;
+
+    pill.querySelector('.area-pill-x').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (activeAreaId === id) activeAreaId = null;
+      const isLast = [...areaPillsContent.querySelectorAll('.area-pill')].filter(p => p !== pill).length === 0;
+      if (isLast) {
+        areaPillsRow.classList.remove('has-pills');   // notch closes
+        areaPillsInner.style.maxHeight = '0px';
+        drawChipSlot.classList.remove('show');
+        setTimeout(() => pill.remove(), 220);         // drop the chip after it has collapsed
+      } else {
+        pill.remove();                                // others remain; notch stays open
+        areaPillsInner.style.maxHeight = areaPillsContent.offsetHeight + 'px';
+      }
+    });
+    pill.addEventListener('click', () => highlightArea(id));
+    areaPillsContent.appendChild(pill);
+    areaPillsRow.classList.add('has-pills');
+    areaPillsInner.style.maxHeight = areaPillsContent.offsetHeight + 'px';   // animate to real content height
+  }
+
+  function highlightArea(id) {
+    if (activeAreaId) {
+      document.querySelector(`.area-pill[data-area-id="${activeAreaId}"]`)?.classList.remove('selected');
+    }
+    if (activeAreaId === id) { activeAreaId = null; return; }
+    activeAreaId = id;
+    document.querySelector(`.area-pill[data-area-id="${id}"]`)?.classList.add('selected');
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+.DS_Store
+.claude/
+.codex/
+.env
+.env.*
+!.env.example
+__pycache__/
+dist/
+US Zip Codes Database v1.94/
+config.js

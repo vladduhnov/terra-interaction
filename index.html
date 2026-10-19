@@ -1,0 +1,2285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script src="config.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Geolava — Evaluate a property</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,200;9..40,300;9..40,400;9..40,600;9..40,700&display=swap" rel="stylesheet">
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.9.4/mapbox-gl.css" rel="stylesheet">
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.9.4/mapbox-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@7/turf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; font-family: 'DM Sans', sans-serif; }
+  :root { --panel-width: min(898px, calc(100vw - 160px)); }
+  /* map starts at the panel's right edge so it isn't hidden underneath */
+  #map {
+    position: absolute;
+    top: 0; right: 0; bottom: 0;
+    left: calc(var(--panel-width) - 10px);
+    transition: left 0.7s cubic-bezier(0.33, 1, 0.68, 1);
+  }
+  body.resizing-panel #map, body.resizing-panel .home-panel { transition: none; }
+  body.resizing-panel { cursor: col-resize; user-select: none; }
+  .mapboxgl-ctrl-top-right, .mapboxgl-ctrl-bottom-left, .mapboxgl-ctrl-bottom-right { display: none; }
+
+  /* ── Draw canvas overlay (ported from map project) ── */
+  #draw-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 5;
+    cursor: url('Icons/cursor-pencil.svg') 2 22, crosshair;
+    display: none;
+  }
+
+  /* ── Comment / Quick Ask popup (ported from map project) ── */
+  .quick-ask-popup {
+    position: fixed;
+    z-index: 100;
+    display: none;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    opacity: 0;
+    transform: translateY(8px) scale(0.95);
+    transition: opacity 0.25s ease, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .quick-ask-popup.visible { display: flex; }
+  .quick-ask-popup.active { opacity: 1; transform: translateY(0) scale(1); }
+  /* while "armed" (following the cursor) only the avatar shows, no input */
+  .quick-ask-popup.armed .quick-ask-input-wrap { display: none; }
+  /* armed popup must not eat the placing click (it sits under the cursor) */
+  .quick-ask-popup.armed { pointer-events: none; }
+  /* the input eases in once placed */
+  .quick-ask-popup:not(.armed) .quick-ask-input-wrap {
+    animation: quickAskInputIn 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+    transform-origin: bottom left;
+  }
+  @keyframes quickAskInputIn {
+    from { opacity: 0; transform: translateY(10px) scale(0.96); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .quick-ask-lottie { width: 44px; height: 44px; margin-left: 0; overflow: hidden; }
+  .quick-ask-lottie svg { transform: scale(2.4) !important; }   /* full sphere fits, no clipping */
+  .quick-ask-input-wrap {
+    display: flex;
+    align-items: center;
+    background: #FEFEFB;
+    border: 1px solid #BEBEBD;
+    border-radius: 12px;
+    padding: 8px 10px 8px 16px;
+    width: 360px;
+    gap: 10px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+  }
+  .quick-ask-input-wrap input {
+    flex: 1;
+    border: none;
+    background: none;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    font-weight: 300;
+    color: #282423;
+    letter-spacing: -0.28px;
+    outline: none;
+  }
+  .quick-ask-input-wrap input::placeholder { color: #939391; }
+  .quick-ask-send {
+    width: 36px;
+    height: 36px;
+    border: none;
+    background: #EEEDEA;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.15s;
+  }
+  .quick-ask-input-wrap.has-text .quick-ask-send { background: #6266E6; }
+  .quick-ask-input-wrap.has-text .quick-ask-send svg path { fill: #FFFFFF; }
+  .quick-ask-dot {
+    position: fixed;
+    width: 28px;
+    height: 28px;
+    z-index: 99;
+    pointer-events: none;
+    display: block;
+    opacity: 0;
+    transform: scale(0);
+    transform-origin: top left;   /* scale from the cursor tip */
+    transition: opacity 0.2s ease, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .quick-ask-dot.active { opacity: 1; transform: scale(1); }
+  /* while aiming a comment, hide the OS cursor over the map (our cursor shows instead) */
+  body.commenting #map,
+  body.commenting #map canvas,
+  body.commenting #draw-canvas,
+  body.commenting .zoom-controls,
+  body.commenting .glass-btn { cursor: none !important; }
+  .quick-ask-flying {
+    position: fixed;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    font-weight: 300;
+    color: #282423;
+    pointer-events: none;
+    z-index: 200;
+    transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    white-space: nowrap;
+    opacity: 1;
+  }
+  .quick-ask-flying.fly { opacity: 0; transform: scale(0.8); }
+
+  /* ──────────────────────────────────────────────
+     Side menu — reused from the map page
+     ────────────────────────────────────────────── */
+  .sidebar {
+    position: absolute;
+    top: 20px;
+    left: 12px;
+    width: 64px;
+    height: calc(100% - 40px);
+    background: #FEFEFB;
+    border: 1px solid #DFDFDE;
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 19px 0;
+    z-index: 12;
+  }
+
+  .sidebar-logo {
+    width: 36px;
+    height: 36px;
+    margin-bottom: 74px;
+  }
+
+  .sidebar-nav {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+    position: relative;
+  }
+
+  .sidebar-nav-item {
+    width: 24px;
+    height: 24px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    background: none;
+    border: none;
+    padding: 0;
+  }
+
+  .sidebar-nav-item.active::before {
+    content: '';
+    position: absolute;
+    left: -20px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 37px;
+    background: #282423;
+    border-radius: 7px;
+  }
+
+  .sidebar-nav-item svg { display: block; }
+
+  /* Home icon: recolorable mask — gray like the other icons when inactive,
+     dark only when this item is the active view */
+  .sidebar-nav-item .nav-ico {
+    width: 24px;
+    height: 24px;
+    background-color: #BEBEBD;
+    -webkit-mask: var(--ico) center / 24px 24px no-repeat;
+            mask: var(--ico) center / 24px 24px no-repeat;
+    transition: background-color 0.2s;
+  }
+  .sidebar-nav-item.active .nav-ico { background-color: #282423; }
+
+  .sidebar-bottom {
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .sidebar-user {
+    width: 32px;
+    height: 32px;
+    background: #F2F2EC;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 400;
+    color: #282423;
+  }
+
+  /* ──────────────────────────────────────────────
+     Home panel (left white surface over the map)
+     ────────────────────────────────────────────── */
+  .home-panel {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: var(--panel-width);
+    height: 100%;
+    background: #FEFEFB;
+    border-radius: 10px;
+    container-type: inline-size;
+    overflow-y: auto;
+    overflow-x: hidden;
+    z-index: 10;
+    transition: width 0.7s cubic-bezier(0.33, 1, 0.68, 1);
+  }
+  /* once a question is asked the panel widens and stops scrolling itself —
+     the answer view owns its own scroll */
+  .home-panel.answer-mode { overflow: hidden; }
+  .panel-resizer {
+    position: absolute;
+    left: calc(var(--panel-width) - 6px);
+    top: 12px;
+    bottom: 12px;
+    width: 12px;
+    z-index: 20;
+    cursor: col-resize;
+    touch-action: none;
+    outline: none;
+  }
+  .panel-resizer::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 4px;
+    width: 4px;
+    height: 40px;
+    border-radius: 10px;
+    background: #BEBEBD;
+    transform: translateY(-50%);
+    transition: background 0.2s;
+  }
+  .panel-resizer:hover::after, .panel-resizer:focus-visible::after,
+  body.resizing-panel .panel-resizer::after { background: #6266E6; }
+  .panel-resizer:focus-visible::after { outline: 2px solid #FEFEFB; }
+
+
+  .home-content {
+    position: relative;
+    min-height: 100%;
+    margin-left: 76px;            /* clear the 64px side menu */
+    padding: 0 36px 130px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* ── Assistant intro ── */
+  .home-intro {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    text-align: center;
+  }
+
+  .assistant-avatar {
+    width: 52px;
+    height: 52px;
+    border-radius: 100px;
+    position: relative;
+    overflow: hidden;
+  }
+  .assistant-avatar img { width: 100%; height: 100%; display: block; object-fit: cover; }
+
+  .home-intro-text { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+
+  .home-intro h1 {
+    font-size: 36px;
+    font-weight: 200;
+    line-height: 36px;
+    color: #282823;
+    letter-spacing: 0;
+    transition: opacity 0.45s ease, filter 0.45s ease, transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: opacity, filter, transform;
+  }
+  .home-intro h1.swap-out { opacity: 0; filter: blur(8px); transform: translateY(-14px); }
+  .home-intro h1.swap-in  { opacity: 0; filter: blur(8px); transform: translateY(14px); }
+
+  .home-intro p {
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 20px;
+    color: #939391;
+    max-width: 446px;
+  }
+
+  /* ── Left-panel entrance: fade + blur, rising up, staggered ── */
+  @keyframes revealUp {
+    from { opacity: 0; filter: blur(6px); transform: translateY(18px); }
+    to   { opacity: 1; filter: blur(0);   transform: translateY(0); }
+  }
+  .assistant-avatar,
+  .home-intro h1,
+  .home-intro p,
+  .home-cards,
+  .home-chat-wrap { will-change: opacity, filter, transform; }
+  /* smoother ease-out (easeOutCubic) — less front-loaded than the expo curve */
+  .assistant-avatar { animation: revealUp 0.9s cubic-bezier(0.33, 1, 0.68, 1) 0.08s backwards; }
+  .home-intro h1    { animation: revealUp 0.9s cubic-bezier(0.33, 1, 0.68, 1) 0.22s backwards; }
+  .home-intro p     { animation: revealUp 0.9s cubic-bezier(0.33, 1, 0.68, 1) 0.36s backwards; }
+  .home-cards       { animation: revealUp 0.9s cubic-bezier(0.33, 1, 0.68, 1) 0.52s backwards; }
+  .home-chat-wrap   { animation: revealUp 0.9s cubic-bezier(0.33, 1, 0.68, 1) 0.68s backwards; }
+
+  /* ── Action cards ── */
+  .home-cards {
+    display: flex;
+    gap: 16px;
+    margin-top: 48px;
+    width: 100%;
+    max-width: 749px;
+  }
+
+  .home-card {
+    width: 239px;
+    flex: 1;
+    min-width: 0;
+    height: 280px;
+    background: #F7F6F1;
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+    cursor: pointer;
+    /* ring starts at 0 spread — tucked behind the card, invisible */
+    box-shadow: 0 0 0 0 #FEFEFB, 0 0 0 0 #6266E6;
+    /* mouse leave → spring (mass 1, stiffness 500, damping 20) sampled as linear() */
+    transition: transform 600ms linear(0, 0.13, 0.417, 0.731, 0.986, 1.144, 1.205, 1.193, 1.14, 1.074, 1.016, 0.977, 0.959, 0.958, 0.967, 0.981, 0.994, 1.003, 1.008, 1.009, 1.007, 1.005, 1.002, 1, 1),
+                box-shadow 250ms ease;
+  }
+  .home-card:hover {
+    transform: translateY(-12px);
+    /* hover in → 250ms cubic-bezier(0.5, 0, 0.30, 1) */
+    transition: transform 250ms cubic-bezier(0.5, 0, 0.30, 1), box-shadow 250ms ease;
+  }
+  .home-card.selected {
+    transform: translateY(-12px);
+    /* white gap (inner) + black stroke (outer) — grows out from under the card */
+    box-shadow: 0 0 0 4px #FEFEFB, 0 0 0 5px #282823;
+  }
+
+  .home-card-title {
+    position: absolute;
+    left: 16px;
+    top: 186px;
+    font-size: 24px;
+    font-weight: 300;
+    line-height: 28px;
+    color: #282823;
+  }
+
+  .home-card-desc {
+    position: absolute;
+    left: 16px;
+    top: 222px;
+    width: 178px;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.2;
+    color: #939391;
+  }
+
+  /* Original card imagery, fitted to the larger card layout. */
+  .home-card-art {
+    position: absolute;
+    left: 4px;
+    right: 4px;
+    top: 4px;
+    height: 160px;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .home-card-art > img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .home-card[data-action="search"] .home-card-art > img {
+    object-fit: contain;
+  }
+
+  @container (max-width: 800px) {
+    .home-card-title { font-size: 20px; }
+    .home-card-desc { width: auto; right: 16px; }
+  }
+  @container (max-width: 700px) {
+    .home-content { padding-top: 40px; }
+    .home-cards { flex-direction: column; margin-top: 24px; }
+    .home-card { width: 100%; min-height: 140px; flex: none; height: 140px; }
+    .home-card-art { right: auto; width: 42%; height: 132px; }
+    .home-card-title { left: 46%; top: 20px; }
+    .home-card-desc { left: 46%; top: 56px; }
+  }
+
+  /* ── Chat input (bottom of panel) ── */
+  .home-chat-wrap {
+    position: absolute;
+    left: 76px;
+    right: 0;
+    bottom: 0;
+    padding: 0 21px 20px;   /* content box = 662px → matches the 3-card row width */
+    z-index: 11;
+  }
+  .home-chat-wrap::before {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 130px;
+    background: linear-gradient(to top, #FEFEFB 40%, transparent);
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  .home-chat {
+    max-width: 624px;
+    margin: 0 auto;
+    background: #FEFEFB;
+    border: 1px solid #BEBEBD;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    gap: 0;
+    padding: 14px 16px;
+    position: relative;
+    z-index: 2;
+    transition: border-color 0.15s ease;
+  }
+  .chat-tools { margin-right: 12px; }
+  /* black stroke only when the text input itself is focused
+     (not when the + button / add menu takes focus) */
+  .home-chat.input-active { border-color: #282823; }
+
+  /* Send button — circular; fades in/out by opacity once there's text */
+  .home-send {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    margin-left: 12px;
+    padding: 0;
+    border: none;
+    background: #6266E6;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease, filter 0.15s ease;
+  }
+  .home-send:hover { filter: brightness(0.95); }
+  .home-send img { display: block; }
+  .home-chat.has-text .home-send {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* ──────────────────────────────────────────────
+     Answer / conversation view (after a question is sent)
+     ────────────────────────────────────────────── */
+  /* home intro + cards rise up and blur out */
+  .home-content {
+    transition: opacity 0.5s ease, filter 0.5s ease,
+                transform 0.6s cubic-bezier(0.33, 1, 0.68, 1);
+  }
+  .home-panel.answer-mode .home-content {
+    opacity: 0;
+    filter: blur(8px);
+    transform: translateY(-48px);
+    pointer-events: none;
+  }
+  .home-panel.answer-mode .home-content.gone { display: none; }
+
+  /* Top nav bar — holds the asked question + actions */
+  .answer-nav {
+    position: absolute;
+    top: 0;
+    left: 76px;
+    right: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 20px 28px;
+    background: #FEFEFB;
+    z-index: 13;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s ease 0.25s;
+  }
+  .home-panel.answer-mode .answer-nav { opacity: 1; pointer-events: auto; }
+  .answer-nav::after {
+    content: '';
+    position: absolute;
+    left: 16px; right: 16px; bottom: 0;
+    height: 1px;
+    background: #DFDFDE;
+  }
+  .answer-nav-title {
+    flex: 1 0 0;
+    min-width: 0;
+    font-size: 20px;
+    font-weight: 300;
+    line-height: 24px;
+    color: #282423;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .answer-nav-controls { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+  .answer-nav-btn {
+    width: 44px;
+    height: 44px;
+    border: none;
+    background: #F7F6F1;
+    border-radius: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .answer-nav-btn:hover { background: #EEEDEA; }
+  .answer-nav-share {
+    height: 44px;
+    border: none;
+    background: #F7F6F1;
+    border-radius: 38px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: #282823;
+    transition: background 0.15s;
+  }
+  .answer-nav-share:hover { background: #EEEDEA; }
+
+  /* Scrollable conversation body */
+  .answer-scroll {
+    position: absolute;
+    top: 0;
+    left: 76px;
+    right: 0;
+    bottom: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 92px 36px 150px;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 11;
+  }
+  .home-panel.answer-mode .answer-scroll { opacity: 1; pointer-events: auto; }
+  .answer-content {
+    width: 624px;
+    max-width: 100%;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+  }
+
+  /* each AI answer block */
+  .answer-block { display: flex; flex-direction: column; gap: 16px; }
+  .answer-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 100px;
+    overflow: hidden;
+    position: relative;
+    background: linear-gradient(50deg, #FA2D20 27%, #769FDA 71%);
+    box-shadow: inset 0 4px 4.8px rgba(255,255,255,0.5);
+    flex-shrink: 0;
+  }
+  .answer-avatar img { width: 100%; height: 100%; display: block; object-fit: cover; }
+  .answer-title {
+    font-size: 32px;
+    font-weight: 300;
+    line-height: 36px;
+    letter-spacing: -0.32px;
+    color: #282823;
+  }
+  .answer-body { display: flex; flex-direction: column; gap: 28px; }
+  .answer-body p {
+    font-size: 20px;
+    font-weight: 400;
+    line-height: 28px;
+    color: #282823;
+  }
+
+  /* user's own message (kept in the conversation, above the AI reply) */
+  .answer-user { display: flex; flex-direction: column; gap: 16px; align-items: flex-start; }
+  .answer-user-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #F2F2EC;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 400;
+    color: #282823;
+    flex-shrink: 0;
+  }
+  .answer-user-text {
+    font-size: 20px;
+    font-weight: 400;
+    line-height: 28px;
+    color: #282823;
+  }
+
+  /* entrance: each element rises + blurs in, staggered */
+  .home-panel.answer-mode .answer-rise {
+    animation: revealUp 0.8s cubic-bezier(0.33, 1, 0.68, 1) backwards;
+  }
+
+  /* word-by-word reveal for the AI reply (ported from the map project) */
+  .blur-word {
+    display: inline-block;
+    opacity: 0;
+    filter: blur(8px);
+    transform: translateY(6px);
+    transition: opacity 500ms ease-out, filter 500ms ease-out, transform 500ms ease-out;
+  }
+  .blur-word.in { opacity: 1; filter: blur(0); transform: translateY(0); }
+
+  .chat-icon-btn {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    border: none;
+    background: #F7F6F1;
+    border-radius: 43px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .chat-icon-btn.bare { background: none; }
+  .chat-icon-btn:hover { background: #EEEDEA; }
+  .chat-icon-btn.bare:hover { background: #F7F6F1; }
+  .chat-icon-btn svg { display: block; }
+
+  /* add ⟷ close blur crossfade */
+  .icon-swap {
+    position: relative;
+    width: 16px;
+    height: 16px;
+  }
+  .icon-swap img {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    transition: opacity 0.26s ease, filter 0.26s ease;
+  }
+  .icon-add { opacity: 1; filter: blur(0); }
+  .icon-close { width: 11px; height: 11px; opacity: 0; filter: blur(3px); }
+  #add-btn[aria-expanded="true"] .icon-add { opacity: 0; filter: blur(3px); }
+  #add-btn[aria-expanded="true"] .icon-close { opacity: 1; filter: blur(0); }
+
+  /* add-button group (add btn + tool chips) */
+  .chat-tools {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  #add-btn { position: relative; z-index: 2; }  /* sits above the chip as it emerges */
+
+  /* Draw chip — slides out from under the add button */
+  .draw-chip-slot {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    max-width: 0;
+    margin-left: 0;
+    opacity: 0;
+    overflow: hidden;
+    transform: translateX(-14px);
+    transition: max-width 0.34s cubic-bezier(0.175, 0.885, 0.32, 1.1),
+                margin-left 0.34s cubic-bezier(0.175, 0.885, 0.32, 1.1),
+                transform 0.34s cubic-bezier(0.175, 0.885, 0.32, 1.1),
+                opacity 0.24s ease;
+  }
+  .draw-chip-slot.show {
+    max-width: 44px;
+    margin-left: 8px;
+    opacity: 1;
+    transform: translateX(0);
+  }
+  .draw-chip {
+    background: rgba(98, 102, 230, 0.2);
+    border: none;
+    border-radius: 43px;
+    padding: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.15s;
+  }
+  .draw-chip:hover { background: rgba(98, 102, 230, 0.32); }
+  .draw-chip img { display: block; }
+
+  /* pencil ⟷ close crossfade on hover */
+  .draw-chip-swap { position: relative; width: 12px; height: 12px; display: block; }
+  .draw-chip-swap > * {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    transition: opacity 0.18s ease;
+  }
+  .draw-chip-close { opacity: 0; }
+  .draw-chip:hover .draw-chip-pencil { opacity: 0; }
+  .draw-chip:hover .draw-chip-close { opacity: 1; }
+
+  /* ── Area pills row (ported from map project) ── */
+  .area-pills-row {
+    position: relative;
+    z-index: 1;
+    max-width: 624px;
+    margin: 0 auto -10px;
+    background: #F7F6F1;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: 10px 10px 0 0;
+    opacity: 0.5;
+    transform: translateY(16px);
+    /* disappearance */
+    transition: transform 0.2s ease-in,
+                opacity 0.2s ease-in,
+                border-color 0.2s ease-in;
+  }
+  .area-pills-row.has-pills {
+    opacity: 1;
+    transform: translateY(0);
+    border-color: #BEBEBD;
+    /* appearance — snappy */
+    transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+                opacity 0.4s ease,
+                border-color 0.4s ease;
+  }
+  /* padding-free wrapper whose max-height animates (collapses to a true 0) */
+  .area-pills-inner {
+    overflow: hidden;
+    max-height: 0;
+    transition: max-height 0.2s ease-in;                          /* disappearance */
+  }
+  .area-pills-row.has-pills .area-pills-inner {
+    transition: max-height 0.4s cubic-bezier(0.16, 1, 0.3, 1);     /* appearance */
+  }
+  .area-pills-content {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 16px 20px;
+  }
+
+  .area-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    padding: 8px 12px;
+    background: transparent;
+    border: 1px solid #BEBEBD;
+    border-radius: 6px;
+    color: #282823;                 /* drives icon + text + (selected) border */
+    font-family: 'DM Sans', sans-serif;
+    white-space: nowrap;
+    flex-shrink: 0;
+    cursor: pointer;
+    overflow: hidden;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .area-pill:hover { border-color: #282823; }   /* hover → black border */
+  .area-pill.selected {
+    color: #6266E6;
+    border-color: #6266E6;          /* completely purple, no fill (wins over hover) */
+  }
+
+  /* leading zone marker (always visible) */
+  .area-pill-zone-icon {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    margin-right: 4px;
+    color: inherit;
+  }
+  .area-pill-zone-icon svg { display: block; width: 16px; height: 16px; color: inherit; }
+
+  .area-pill-label {
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 16px;
+    color: inherit;
+  }
+
+  /* close × — appears to the RIGHT on hover, growing the pill width */
+  .area-pill-x {
+    flex-shrink: 0;
+    border: none;
+    background: none;
+    padding: 0;
+    cursor: pointer;
+    color: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 12.8px;
+    height: 12.8px;
+    margin-left: 10px;
+    opacity: 1;            /* always visible, not only on hover */
+  }
+  .area-pill-x svg { display: block; width: 12.8px; height: 12.8px; color: inherit; flex-shrink: 0; }
+
+  /* ── Add popover ── */
+  .chat-add-wrap { position: static; flex-shrink: 0; }
+
+  .add-popover {
+    position: absolute;
+    bottom: calc(100% + 9px);   /* 8px visual gap above the input box (1px border) */
+    left: 0;                    /* aligned with the input's left edge */
+    background: #FEFEFB;
+    border: 1px solid #BEBEBD;
+    border-radius: 10px;
+    padding: 20px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 178px;
+    z-index: 30;
+    transform-origin: bottom left;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(8px) scale(0.97);
+    transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.22s;
+  }
+  .add-popover.open {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0) scale(1);
+  }
+
+  .add-popover-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 8px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    width: 100%;
+    border-radius: 6px;
+  }
+  .add-popover-item-text {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 16px;
+    color: #282423;
+    white-space: nowrap;
+  }
+  .add-popover-icon {
+    border: 1px solid #DFDFDE;
+    border-radius: 5px;
+    padding: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .add-popover-icon img { display: block; width: 14px; height: 14px; }
+  .add-popover-item:hover .add-popover-icon {
+    border-color: #BEBEBD;
+    background: #F7F6F1;
+  }
+
+  /* ── Address suggestions popover (above the input) ── */
+  .addr-suggest {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 21px;
+    right: 21px;
+    max-width: 662px;
+    margin: 0 auto;
+    background: #FEFEFB;
+    border: 1px solid #BEBEBD;
+    border-radius: 10px;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    z-index: 31;
+    transform-origin: bottom center;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(8px) scale(0.99);
+    transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.22s;
+    box-shadow: 0 12px 32px -8px rgba(40, 36, 35, 0.18);
+  }
+  .addr-suggest.open { opacity: 1; visibility: visible; transform: translateY(0) scale(1); }
+  .addr-suggest-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    background: none;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    width: 100%;
+    text-align: left;
+    transition: background 0.12s;
+  }
+  .addr-suggest-item:hover,
+  .addr-suggest-item.active { background: #F7F6F1; }
+  .addr-suggest-pin {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: #F2F2EC;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .addr-suggest-pin svg { display: block; }
+  .addr-suggest-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .addr-suggest-title {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 18px;
+    color: #282423;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .addr-suggest-sub {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px;
+    line-height: 14px;
+    color: #939391;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .add-popover-divider {
+    height: 1px;
+    width: 100%;
+    background: #DFDFDE;
+  }
+
+  .home-chat input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: none;
+    outline: none;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    font-weight: 400;
+    letter-spacing: -0.28px;
+    color: #282823;
+  }
+  .home-chat input::placeholder { color: #939391; }
+
+  /* ──────────────────────────────────────────────
+     Map overlays (right side)
+     ────────────────────────────────────────────── */
+
+  .zoom-controls {
+    position: absolute;
+    top: 24px;
+    right: 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(25px);
+    -webkit-backdrop-filter: blur(25px);
+    border: 0.5px solid rgba(255, 255, 255, 0.4);
+    border-radius: 999px;
+    overflow: hidden;
+    z-index: 11;
+  }
+  .zoom-btn {
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    transition: background 0.15s;
+  }
+  .zoom-btn:hover { background: rgba(255, 255, 255, 0.1); }
+  .zoom-btn svg { display: block; }
+
+  .glass-btn {
+    position: absolute;
+    top: 116px;
+    right: 24px;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(25px);
+    -webkit-backdrop-filter: blur(25px);
+    border: 0.5px solid rgba(255, 255, 255, 0.4);
+    border-radius: 999px;
+    cursor: pointer;
+    z-index: 11;
+    padding: 0;
+    transition: background 0.15s;
+  }
+  .glass-btn:hover { background: rgba(0, 0, 0, 0.55); }
+  .glass-btn svg { display: block; transition: transform 0.3s; }
+</style>
+<link rel="stylesheet" href="workspace.css">
+</head>
+<body>
+
+<div id="map"></div>
+<canvas id="draw-canvas"></canvas>
+
+<!-- Comment / Quick Ask popup -->
+<img class="quick-ask-dot" id="quick-ask-dot" src="Icons/Cursor.svg" alt="" width="28" height="28">
+<div class="quick-ask-popup" id="quick-ask-popup">
+  <div class="quick-ask-lottie" id="quick-ask-lottie"></div>
+  <div class="quick-ask-input-wrap" id="quick-ask-input-wrap">
+    <input type="text" id="quick-ask-input" placeholder="Add a comment…">
+    <button class="quick-ask-send" id="quick-ask-send" type="button" aria-label="Send comment">
+      <svg width="14" height="14" viewBox="0 0 18 18" fill="none"><path d="M8.99732 1.05469C9.55993 1.05469 10.0121 1.30088 10.4146 1.62378C10.8001 1.9331 11.2238 2.38353 11.7197 2.90698L16.2915 7.73291L15.2031 8.76416L10.6306 3.93823C10.2603 3.54734 9.98029 3.25428 9.74732 3.03442V17.2485H8.24731V3.03442C8.01434 3.25428 7.73434 3.54734 7.36401 3.93823L2.7915 8.76416L1.70312 7.73291L6.2749 2.90698C6.7708 2.38353 7.19452 1.9331 7.58008 1.62378C7.98258 1.30088 8.4347 1.05469 8.99732 1.05469Z" fill="#BEBEBD"/></svg>
+    </button>
+  </div>
+</div>
+
+<!-- ── Map overlays ── -->
+<div class="zoom-controls">
+  <button class="zoom-btn" id="zoom-in" title="Zoom in">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6.66671 12.9999V9.33325C6.66671 8.96506 6.36823 8.66659 6.00004 8.66659H2.33337C1.33337 8.66659 1.33337 8.21887 1.33337 7.66659C1.33337 7.1143 1.33337 6.66659 2.33337 6.66659H6.00004C6.36823 6.66659 6.66671 6.36811 6.66671 5.99992V2.33325C6.66671 1.78097 6.66671 1.33325 7.66671 1.33325C8.66671 1.33325 8.66671 1.78097 8.66671 2.33325V5.99992C8.66671 6.36811 8.96518 6.66659 9.33337 6.66659H13C14 6.66659 14 7.1143 14 7.66659C14 8.21887 14 8.66659 13 8.66659H9.33337C8.96518 8.66659 8.66671 8.96506 8.66671 9.33325V12.9999C8.66671 13.9999 8.21899 13.9999 7.66671 13.9999C7.11442 13.9999 6.66671 13.9999 6.66671 12.9999Z" fill="white"/></svg>
+  </button>
+  <button class="zoom-btn" id="zoom-out" title="Zoom out">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13 6.66675C14 6.66675 14 7.11446 14 7.66675C14 8.21903 14 8.66675 13 8.66675H2.33337C1.33337 8.66675 1.33337 8.21903 1.33337 7.66675C1.33337 7.11446 1.33337 6.66675 2.33337 6.66675H13Z" fill="white"/></svg>
+  </button>
+</div>
+
+<button class="glass-btn" id="compass" title="Street view / reset bearing">
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.7489 2.25124C13.6364 2.13859 13.4947 2.05953 13.3397 2.02293C13.1848 1.98634 13.0227 1.99366 12.8717 2.04407L5.15754 4.61546C5.03137 4.6576 4.91673 4.7285 4.82268 4.82256C4.72862 4.91662 4.65772 5.03125 4.61557 5.15742L2.04419 12.8716C1.99379 13.0226 1.98646 13.1847 2.02302 13.3397C2.05958 13.4946 2.13858 13.6364 2.25117 13.749C2.36376 13.8615 2.50548 13.9405 2.66045 13.9771C2.81542 14.0137 2.9775 14.0063 3.12854 13.9559L10.8427 11.3845C10.9689 11.3424 11.0835 11.2715 11.1776 11.1774C11.2716 11.0833 11.3425 10.9687 11.3847 10.8425L13.9561 3.12834C14.0064 2.97732 14.0136 2.81528 13.9771 2.66036C13.9405 2.50545 13.8615 2.36378 13.7489 2.25124ZM5.16115 11.4715C4.77028 11.6017 4.39845 11.2299 4.52873 10.839L5.85047 6.87368C5.968 6.52106 6.41553 6.41541 6.67836 6.67823L9.32225 9.32205C9.58509 9.58489 9.47942 10.0325 9.12677 10.15L5.16115 11.4715Z" fill="white"/></svg>
+</button>
+
+<!-- ── Left home panel ── -->
+<div id="panel-resizer" class="panel-resizer" role="separator" aria-label="Side panel width" aria-orientation="vertical" aria-controls="home-panel panel-layout-popover" aria-haspopup="dialog" tabindex="0" aria-description="Click or hover for layout presets · Drag to resize · Enter for presets"><img src="geolava-assets/panel-layout-handle.svg" width="14" height="14" alt="" draggable="false"></div>
+<div id="panel-layout-popover" class="panel-layout-popover" role="dialog" aria-label="Panel layout" hidden>
+  <div class="panel-layout-heading"><span>Layout</span><output id="panel-layout-current"></output></div>
+  <div class="panel-layout-options" role="group" aria-label="Layout presets">
+    <button type="button" class="panel-layout-option" data-panel-layout="map" aria-pressed="false"><span class="panel-layout-preview" style="--preview-panel:28%" aria-hidden="true"><i></i><i></i></span><span>Map first</span></button>
+    <button type="button" class="panel-layout-option" data-panel-layout="balanced" aria-pressed="false"><span class="panel-layout-preview" style="--preview-panel:50%" aria-hidden="true"><i></i><i></i></span><span>50 / 50</span></button>
+    <button type="button" class="panel-layout-option" data-panel-layout="panel" aria-pressed="false"><span class="panel-layout-preview" style="--preview-panel:78%" aria-hidden="true"><i></i><i></i></span><span>Panel first</span></button>
+  </div>
+  <p>Drag the handle for a custom width.</p>
+</div>
+<div class="home-panel" id="home-panel">
+
+  <!-- Side menu (reused from map page) -->
+  <div class="sidebar">
+    <div class="sidebar-logo">
+      <img src="Icons/Geolava-Logo.svg" alt="Geolava" width="36" height="36">
+    </div>
+    <div class="sidebar-nav">
+      <button class="sidebar-nav-item active" title="Home">
+        <span class="nav-ico" role="img" aria-label="Home" style="--ico: url('Icons/home.svg')"></span>
+      </button>
+      <button class="sidebar-nav-item" title="History">
+        <img src="Icons/History.svg" alt="History" width="24" height="24">
+      </button>
+      <button class="sidebar-nav-item" title="Watchlist">
+        <img src="Icons/Watchlist.svg" alt="Watchlist" width="24" height="24">
+      </button>
+    </div>
+    <div class="sidebar-bottom">
+      <div class="sidebar-account"><button type="button" class="sidebar-user" id="sidebar-account-button" aria-label="Account" aria-expanded="false" aria-controls="sidebar-account-popover">V</button><div class="sidebar-account-popover" id="sidebar-account-popover" hidden><button type="button" class="story-btn" id="sidebar-logout">Log out</button></div></div>
+    </div>
+  </div>
+
+  <!-- Panel content -->
+  <div class="home-content">
+    <div class="home-intro">
+      <div class="assistant-avatar">
+        <img src="geolava-assets/Geolava-assistant.png" alt="Geolava assistant">
+      </div>
+      <div class="home-intro-text">
+        <h1>Evaluate a property</h1>
+        <p>Ask questions about any property, neighborhood, or area. Geolava answers with live spatial intelligence — not stale records</p>
+      </div>
+    </div>
+
+    <div class="home-cards">
+      <!-- Pick -->
+      <div class="home-card" data-action="pick">
+        <div class="home-card-art">
+          <img src="geolava-assets/Pick.png" alt="">
+        </div>
+        <div class="home-card-title">Pick a spot</div>
+        <div class="home-card-desc">Click any building, parcel, or address to instantly view its spatial data.</div>
+      </div>
+
+      <!-- Ask -->
+      <div class="home-card" data-action="search">
+        <div class="home-card-art">
+          <img src="geolava-assets/Search.png" alt="">
+        </div>
+        <div class="home-card-title">Ask anything</div>
+        <div class="home-card-desc">Type a question in plain English and Geolava analyzes the imagery to answer.</div>
+      </div>
+
+      <!-- Draw -->
+      <div class="home-card" data-action="draw">
+        <div class="home-card-art">
+          <img src="geolava-assets/Draw.png" alt="">
+        </div>
+        <div class="home-card-title">Draw an area</div>
+        <div class="home-card-desc">Draw zones to analyze everything inside and compare areas.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Answer / conversation view (hidden until a question is sent) -->
+  <div class="answer-nav" id="answer-nav">
+    <p class="answer-nav-title" id="answer-nav-title"></p>
+    <div class="answer-nav-controls">
+      <button class="answer-nav-btn" title="Bookmark" aria-label="Bookmark">
+        <img src="Icons/bookmark-icon.svg" width="18" height="18" alt="">
+      </button>
+      <button class="answer-nav-share" title="Share">
+        <img src="Icons/Share-icon.svg" width="18" height="18" alt="">
+        Share
+      </button>
+    </div>
+  </div>
+
+  <div class="answer-scroll" id="answer-scroll">
+    <div class="answer-content" id="answer-content"></div>
+  </div>
+
+  <!-- Chat input -->
+  <div class="home-chat-wrap">
+    <div class="area-pills-row" id="area-pills-row"><div class="area-pills-inner" id="area-pills-inner"><div class="area-pills-content" id="area-pills-content"></div></div></div>
+    <div class="addr-suggest" id="addr-suggest" role="listbox"></div>
+    <div class="home-chat">
+      <div class="chat-tools">
+      <div class="chat-add-wrap">
+        <button class="chat-icon-btn" id="add-btn" title="Add" aria-haspopup="true" aria-expanded="false">
+          <span class="icon-swap">
+            <img class="icon-add" src="Icons/add-square-dashboard.svg" width="16" height="16" alt="Add">
+            <img class="icon-close" src="Icons/popover-close.svg" width="14" height="14" alt="Close" aria-hidden="true">
+          </span>
+        </button>
+        <div class="add-popover" id="add-popover" role="menu">
+          <button class="add-popover-item" role="menuitem" data-action="add-file">
+            <span class="add-popover-icon"><img src="Icons/popover-add-file.svg" alt=""></span>
+            <span class="add-popover-item-text">Add file</span>
+          </button>
+          <div class="add-popover-divider"></div>
+          <button class="add-popover-item" role="menuitem" data-action="comment" aria-keyshortcuts="C">
+            <span class="add-popover-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M23 11C23 5.38065 17.9734 1 12 1C6.02658 1 1 5.38065 1 11C1 13.4862 1.93896 16.1939 3.64022 18.0672C3.8042 18.2477 3.90234 18.3562 3.96986 18.4383C3.97966 18.4502 3.98777 18.4604 3.99441 18.4688C3.99461 18.4719 3.99481 18.4751 3.99501 18.4785C3.99961 18.5571 4 18.6653 4 18.8666L4 18.9346C3.99994 19.732 3.99989 20.4297 4.07185 20.969C4.14557 21.5217 4.32524 22.181 4.92493 22.6075C5.06379 22.7062 5.21365 22.7885 5.37151 22.8527C6.05323 23.1298 6.70596 22.9276 7.21182 22.6932C7.70555 22.4645 8.29424 22.09 8.96701 21.6621L9.87513 21.0845C10.0425 20.978 10.1301 20.9229 10.1958 20.8866C10.1979 20.8855 10.1999 20.8844 10.2018 20.8833C10.2089 20.8836 10.217 20.8839 10.2263 20.8844C10.3181 20.8893 10.4439 20.9028 10.6664 20.9272C11.1039 20.9753 11.549 21 12 21C17.9734 21 23 16.6193 23 11ZM12 3C17.0723 3 21 6.67822 21 11C21 15.3218 17.0723 19 12 19C11.622 19 11.2499 18.9793 10.8848 18.9392L10.8622 18.9367C10.6706 18.9156 10.488 18.8956 10.3333 18.8873C10.1684 18.8784 9.96608 18.8779 9.74947 18.9283C9.40921 19.0074 9.10851 19.2003 8.86839 19.3543C8.84565 19.3689 8.82345 19.3831 8.80181 19.3969L7.95107 19.938C7.20371 20.4133 6.72878 20.7128 6.37108 20.8785C6.24002 20.9393 6.15738 20.966 6.11053 20.9776C6.09517 20.9318 6.07338 20.8478 6.05428 20.7046C6.00215 20.3138 6 19.7523 6 18.8666C6 18.8401 6.0001 18.8128 6.00021 18.7848C6.00131 18.4965 6.00266 18.1395 5.89298 17.8179C5.87431 17.7631 5.85824 17.7215 5.83529 17.6685C5.74572 17.4617 5.6181 17.2938 5.51449 17.1678C5.41192 17.0431 5.27994 16.8978 5.13549 16.7388L5.12079 16.7226C3.78677 15.2536 3 13.0404 3 11C3 6.67822 6.92772 3 12 3Z" fill="#282823"/></svg></span>
+            <span class="add-popover-item-text">Comment</span><kbd class="tool-key-hint">C</kbd>
+          </button>
+          <button class="add-popover-item" role="menuitem" data-action="draw" aria-keyshortcuts="D">
+            <span class="add-popover-icon"><img src="Icons/popover-pencil.svg" alt=""></span>
+            <span class="add-popover-item-text">Draw the area</span><kbd class="tool-key-hint">D</kbd>
+          </button>
+        </div>
+      </div>
+        <div class="draw-chip-slot" id="draw-chip-slot">
+          <button class="draw-chip" id="draw-chip" title="Drawing area — remove">
+            <span class="draw-chip-swap">
+              <img class="draw-chip-pencil" src="Icons/draw-chip-pencil.svg" width="12" height="12" alt="Draw area">
+              <svg class="draw-chip-close" width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true">
+                <path d="M1.5 1.5L9.5 9.5M9.5 1.5L1.5 9.5" stroke="#6266E6" stroke-width="1.6" stroke-linecap="round"/>
+              </svg>
+            </span>
+          </button>
+        </div>
+        <div class="draw-chip-slot" id="comment-chip-slot">
+          <button class="draw-chip" id="comment-chip" title="Commenting — remove">
+            <span class="draw-chip-swap">
+              <svg class="draw-chip-pencil" width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path fill-rule="evenodd" clip-rule="evenodd" d="M23 11C23 5.38065 17.9734 1 12 1C6.02658 1 1 5.38065 1 11C1 13.4862 1.93896 16.1939 3.64022 18.0672C3.8042 18.2477 3.90234 18.3562 3.96986 18.4383C3.97966 18.4502 3.98777 18.4604 3.99441 18.4688C3.99461 18.4719 3.99481 18.4751 3.99501 18.4785C3.99961 18.5571 4 18.6653 4 18.8666L4 18.9346C3.99994 19.732 3.99989 20.4297 4.07185 20.969C4.14557 21.5217 4.32524 22.181 4.92493 22.6075C5.06379 22.7062 5.21365 22.7885 5.37151 22.8527C6.05323 23.1298 6.70596 22.9276 7.21182 22.6932C7.70555 22.4645 8.29424 22.09 8.96701 21.6621L9.87513 21.0845C10.0425 20.978 10.1301 20.9229 10.1958 20.8866C10.1979 20.8855 10.1999 20.8844 10.2018 20.8833C10.2089 20.8836 10.217 20.8839 10.2263 20.8844C10.3181 20.8893 10.4439 20.9028 10.6664 20.9272C11.1039 20.9753 11.549 21 12 21C17.9734 21 23 16.6193 23 11ZM12 3C17.0723 3 21 6.67822 21 11C21 15.3218 17.0723 19 12 19C11.622 19 11.2499 18.9793 10.8848 18.9392L10.8622 18.9367C10.6706 18.9156 10.488 18.8956 10.3333 18.8873C10.1684 18.8784 9.96608 18.8779 9.74947 18.9283C9.40921 19.0074 9.10851 19.2003 8.86839 19.3543C8.84565 19.3689 8.82345 19.3831 8.80181 19.3969L7.95107 19.938C7.20371 20.4133 6.72878 20.7128 6.37108 20.8785C6.24002 20.9393 6.15738 20.966 6.11053 20.9776C6.09517 20.9318 6.07338 20.8478 6.05428 20.7046C6.00215 20.3138 6 19.7523 6 18.8666C6 18.8401 6.0001 18.8128 6.00021 18.7848C6.00131 18.4965 6.00266 18.1395 5.89298 17.8179C5.87431 17.7631 5.85824 17.7215 5.83529 17.6685C5.74572 17.4617 5.6181 17.2938 5.51449 17.1678C5.41192 17.0431 5.27994 16.8978 5.13549 16.7388L5.12079 16.7226C3.78677 15.2536 3 13.0404 3 11C3 6.67822 6.92772 3 12 3Z" fill="#6266E6"/>
+              </svg>
+              <svg class="draw-chip-close" width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true">
+                <path d="M1.5 1.5L9.5 9.5M9.5 1.5L1.5 9.5" stroke="#6266E6" stroke-width="1.6" stroke-linecap="round"/>
+              </svg>
+            </span>
+          </button>
+        </div>
+      </div>
+      <input type="text" id="home-chat-input" placeholder="What property are we looking for?">
+      <button class="home-send" id="home-send" type="button" title="Send" aria-label="Send">
+        <img src="Icons/send-arrow.svg" width="18" height="18" alt="">
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  mapboxgl.accessToken = window.GEOLAVA_CONFIG?.mapboxAccessToken || '';
+
+  const STYLE_SATELLITE = 'mapbox://styles/mapbox/satellite-streets-v12';
+
+  // Default view: Salesforce Tower, San Francisco
+  const SF_SALESFORCE_TOWER = [-122.3972, 37.7897];
+  const map = new mapboxgl.Map({
+    container: 'map',
+    style: STYLE_SATELLITE,
+    center: SF_SALESFORCE_TOWER,
+    zoom: 15.5,
+    pitch: 0,
+    bearing: 0
+  });
+
+  // Zoom controls
+  document.getElementById('zoom-in').addEventListener('click', () => map.zoomIn());
+  document.getElementById('zoom-out').addEventListener('click', () => map.zoomOut());
+
+  // Compass — reflect bearing, reset on click
+  const compassSvg = document.querySelector('#compass svg');
+  map.on('rotate', () => {
+    compassSvg.style.transform = `rotate(${-map.getBearing()}deg)`;
+  });
+  document.getElementById('compass').addEventListener('click', () => {
+    map.easeTo({ bearing: 0, pitch: 0 });
+  });
+
+  // Action cards → select on click (stays raised with purple stroke)
+  const homeCards = document.querySelectorAll('.home-card');
+  homeCards.forEach(card => {
+    card.addEventListener('click', () => {
+      const action = card.dataset.action;
+      const wasSelected = card.classList.contains('selected');
+      homeCards.forEach(c => c.classList.remove('selected'));
+      if (!wasSelected) card.classList.add('selected');
+
+      // the Draw card drives the drawing pill / draw mode
+      if (action === 'draw' && !wasSelected) {
+        drawChipSlot.classList.add('show');
+        enterDrawMode();
+      } else {
+        drawChipSlot.classList.remove('show');
+        exitDrawMode();
+      }
+
+      // the Pick card drives the comment popup
+      if (action === 'pick' && !wasSelected) {
+        armComment();
+      } else if (commentMode) {
+        closeQuickAsk();
+      }
+
+      // the Search card (and other non-map cards) activate the chat input for typing
+      if (action !== 'draw' && action !== 'pick') {
+        const ci = document.getElementById('home-chat-input');
+        requestAnimationFrame(() => ci.focus());
+      }
+    });
+  });
+
+  // ── Rotating intro heading (blur-fade between prompts) ──
+  const introTitle = document.querySelector('.home-intro h1');
+  if (introTitle) {
+    const introTitles = [
+      'Evaluate a property',
+      'Understand a market',
+      'Research a location',
+      'Spot hidden risk',
+      'Explore an opportunity'
+    ];
+    let introIdx = introTitles.indexOf(introTitle.textContent.trim());
+    if (introIdx < 0) introIdx = introTitles.length - 1;
+    setInterval(() => {
+      introTitle.classList.add('swap-out');           // blur + fade + rise up out
+      setTimeout(() => {
+        introIdx = (introIdx + 1) % introTitles.length;
+        // jump below (no transition), swap text, then animate up into place
+        introTitle.style.transition = 'none';
+        introTitle.classList.remove('swap-out');
+        introTitle.classList.add('swap-in');
+        introTitle.textContent = introTitles[introIdx];
+        void introTitle.offsetWidth;                  // reflow to lock the start
+        introTitle.style.transition = '';
+        introTitle.classList.remove('swap-in');        // rise from below + blur in
+      }, 450);
+    }, 3200);
+  }
+
+  // ── Add popover ──
+  const addBtn = document.getElementById('add-btn');
+  const addPopover = document.getElementById('add-popover');
+
+  function setAddPopover(open) {
+    addPopover.classList.toggle('open', open);
+    addBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  addBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setAddPopover(!addPopover.classList.contains('open'));
+  });
+
+  const drawChipSlot = document.getElementById('draw-chip-slot');
+  const drawChip = document.getElementById('draw-chip');
+  const commentChipSlot = document.getElementById('comment-chip-slot');
+  const commentChip = document.getElementById('comment-chip');
+  // clicking the comment chip cancels comment mode
+  commentChip.addEventListener('click', (e) => { e.stopPropagation(); endComment(); });
+
+  addPopover.querySelectorAll('.add-popover-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const action = item.dataset.action;
+      setAddPopover(false);
+      if (action === 'draw') {
+        closeQuickAsk();   // end comment mode if it was active
+        homeCards.forEach(c => c.classList.remove('selected'));
+        document.querySelector('.home-card[data-action="draw"]')?.classList.add('selected');
+        drawChipSlot.classList.add('show');
+        enterDrawMode();
+      } else if (action === 'comment') {
+        openComment();
+      } else {
+        document.getElementById('home-chat-input').focus();
+      }
+      console.log('add-popover action:', action);
+    });
+  });
+
+  // Click the draw chip to cancel drawing / remove it
+  drawChip.addEventListener('click', (e) => {
+    e.stopPropagation();
+    drawChipSlot.classList.remove('show');
+    exitDrawMode();
+    document.querySelector('.home-card[data-action="draw"]')?.classList.remove('selected');
+  });
+
+  // Close on outside click or Escape
+  document.addEventListener('click', (e) => {
+    if (!addPopover.contains(e.target) && e.target !== addBtn) setAddPopover(false);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') setAddPopover(false);
+  });
+
+  // ── Chat input: reveal send button when there's text ──
+  const homeChat = document.querySelector('.home-chat');
+  const homeInput = document.getElementById('home-chat-input');
+  const homeSend = document.getElementById('home-send');
+
+  homeInput.addEventListener('input', () => {
+    homeChat.classList.toggle('has-text', homeInput.value.trim().length > 0);
+    onInputForSuggestions();
+  });
+  homeInput.addEventListener('focus', () => homeChat.classList.add('input-active'));
+  homeInput.addEventListener('blur', () => homeChat.classList.remove('input-active'));
+
+  // ── Address autocomplete suggestions (Mapbox geocoder) ──
+  const addrSuggest = document.getElementById('addr-suggest');
+  const PIN_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 21s7-5.6 7-11a7 7 0 1 0-14 0c0 5.4 7 11 7 11z" stroke="#6266E6" stroke-width="1.6"/><circle cx="12" cy="10" r="2.4" stroke="#6266E6" stroke-width="1.6"/></svg>';
+  let suggestTimer = null;
+  let suggestActiveIdx = -1;
+  let suggestItems = [];
+
+  // pull the address-like fragment out of a free-text prompt:
+  // "Give me information on 2068 Mar" → "2068 Mar"
+  function extractAddressFragment(text) {
+    const m = text.match(/\d.*$/);          // from the first digit to the end
+    return (m ? m[0] : text).trim();
+  }
+
+  function closeSuggestions() {
+    addrSuggest.classList.remove('open');
+    suggestActiveIdx = -1;
+    suggestItems = [];
+  }
+
+  function renderSuggestions(features) {
+    suggestItems = features;
+    suggestActiveIdx = -1;
+    if (!features.length) { closeSuggestions(); return; }
+    addrSuggest.innerHTML = '';
+    features.forEach((f, idx) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'addr-suggest-item';
+      item.setAttribute('role', 'option');
+      const parts = (f.place_name || '').split(',');
+      const title = parts.shift().trim();
+      const sub = parts.join(',').trim();
+      item.innerHTML =
+        '<span class="addr-suggest-pin">' + PIN_SVG + '</span>' +
+        '<span class="addr-suggest-text"><span class="addr-suggest-title"></span>' +
+        (sub ? '<span class="addr-suggest-sub"></span>' : '') + '</span>';
+      item.querySelector('.addr-suggest-title').textContent = title;
+      if (sub) item.querySelector('.addr-suggest-sub').textContent = sub;
+      item.addEventListener('mousedown', (e) => {   // mousedown beats input blur
+        e.preventDefault();
+        chooseSuggestion(f);
+      });
+      addrSuggest.appendChild(item);
+    });
+    addrSuggest.classList.add('open');
+  }
+
+  function chooseSuggestion(feature) {
+    const center = feature.center;
+    map.flyTo({ center, zoom: 16, speed: 1.2, essential: true });
+    if (searchMarker) searchMarker.remove();
+    searchMarker = new mapboxgl.Marker({ color: '#6266E6' }).setLngLat(center).addTo(map);
+    // keep any leading prompt text, swap the address fragment for the chosen one
+    const lead = homeInput.value.replace(/\d.*$/, '').trim();
+    const label = feature.place_name.split(',').slice(0, 2).join(',').trim();
+    homeInput.value = (lead ? lead + ' ' : '') + label;
+    homeChat.classList.add('has-text');
+    closeSuggestions();
+    homeInput.focus();
+  }
+
+  async function fetchSuggestions(fragment) {
+    if (document.body.classList.contains('story-prototype')) return;
+    try {
+      const c = map.getCenter();   // bias results toward what's on screen
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(fragment)}.json`
+        + `?access_token=${mapboxgl.accessToken}&autocomplete=true&types=address,poi,place&limit=5&country=us`
+        + `&proximity=${c.lng},${c.lat}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      renderSuggestions(data.features || []);
+    } catch (err) {
+      console.error('Suggestion lookup failed:', err);
+      closeSuggestions();
+    }
+  }
+
+  function onInputForSuggestions() {
+    if (document.body.classList.contains('story-prototype')) return;
+    clearTimeout(suggestTimer);
+    const fragment = extractAddressFragment(homeInput.value);
+    // only query once we have a street number + a little context
+    if (!/\d/.test(fragment) || fragment.length < 3) { closeSuggestions(); return; }
+    suggestTimer = setTimeout(() => fetchSuggestions(fragment), 220);
+  }
+
+  // keyboard navigation within the suggestion list
+  homeInput.addEventListener('keydown', (e) => {
+    if (!addrSuggest.classList.contains('open')) return;
+    const items = addrSuggest.querySelectorAll('.addr-suggest-item');
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      suggestActiveIdx = Math.min(suggestActiveIdx + 1, items.length - 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      suggestActiveIdx = Math.max(suggestActiveIdx - 1, 0);
+    } else if (e.key === 'Enter' && suggestActiveIdx >= 0) {
+      e.preventDefault();
+      e.stopImmediatePropagation();   // don't let the send handler fire too
+      chooseSuggestion(suggestItems[suggestActiveIdx]);
+      return;
+    } else if (e.key === 'Escape') {
+      closeSuggestions();
+      return;
+    } else {
+      return;
+    }
+    items.forEach((it, i) => it.classList.toggle('active', i === suggestActiveIdx));
+  });
+
+  homeInput.addEventListener('blur', () => setTimeout(closeSuggestions, 120));
+
+  // ── Search → geocode the typed location and move the map there ──
+  let searchMarker = null;
+
+  async function geocodeAndFly(query) {
+    try {
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json`
+        + `?access_token=${mapboxgl.accessToken}&limit=1`;
+      const res = await fetch(url);
+      const data = await res.json();
+      const feature = data.features && data.features[0];
+      if (!feature) {
+        console.warn('No location found for:', query);
+        return false;
+      }
+      const center = feature.center; // [lng, lat]
+      map.flyTo({ center, zoom: 15, speed: 1.2, essential: true });
+
+      if (searchMarker) searchMarker.remove();
+      searchMarker = new mapboxgl.Marker({ color: '#6266E6' })
+        .setLngLat(center)
+        .addTo(map);
+      return true;
+    } catch (err) {
+      console.error('Geocoding failed:', err);
+      return false;
+    }
+  }
+
+  // keep the Mapbox canvas in sync while the panel (and map's left edge) animate
+  function resizeMapDuring(ms) {
+    const start = performance.now();
+    (function tick(now) {
+      map.resize();
+      if (now - start < ms) requestAnimationFrame(tick);
+    })(start);
+  }
+
+  // ── Conversation / answer view ──
+  const homePanel = document.querySelector('.home-panel');
+  const panelResizer = document.getElementById('panel-resizer');
+  const layoutPopover = document.getElementById('panel-layout-popover');
+  const layoutButtons = [...layoutPopover.querySelectorAll('[data-panel-layout]')];
+  let layoutOpenTimer, layoutCloseTimer, selectedPanelLayout = null;
+  let panelDragStartX = 0, panelDragStartWidth = 0, panelWasDragged = false, panelPopupWasOpen = false;
+  let panelAnimationFrame = 0, panelAnimationRender = null;
+  function layoutWidth(preset) {
+    const { min, max } = panelLimits();
+    return preset === 'map' ? min : preset === 'panel' ? max : Math.round(window.innerWidth / 2);
+  }
+  function updateLayoutPresets(width) {
+    const { min, max } = panelLimits();
+    let selected = 'Custom';
+    layoutButtons.forEach(button => {
+      const target = layoutWidth(button.dataset.panelLayout);
+      button.disabled = target < min || target > max;
+      const active = !button.disabled && Math.abs(width - target) <= 1;
+      button.setAttribute('aria-pressed', String(active));
+      button.title = button.disabled ? '50–50 needs a wider window' : button.textContent.trim() + ' · ' + target + ' px';
+      if (active) selected = button.textContent.trim();
+    });
+    document.getElementById('panel-layout-current').textContent = selected + ' · ' + width + ' px';
+  }
+  function openLayoutPresets(keyboard = false) {
+    clearTimeout(layoutCloseTimer);
+    if (document.body.classList.contains('resizing-panel')) return;
+    updateLayoutPresets(Number(panelResizer.getAttribute('aria-valuenow')));
+    layoutPopover.hidden = false;
+    if (keyboard) (layoutButtons.find(button => button.getAttribute('aria-pressed') === 'true') || layoutButtons[0]).focus();
+  }
+  function closeLayoutPresets(restoreFocus = false) {
+    clearTimeout(layoutOpenTimer); clearTimeout(layoutCloseTimer);
+    layoutPopover.hidden = true;
+    if (restoreFocus) panelResizer.focus();
+  }
+  panelResizer.addEventListener('pointerenter', () => {
+    clearTimeout(layoutCloseTimer);
+    layoutOpenTimer = setTimeout(() => openLayoutPresets(), 250);
+  });
+  panelResizer.addEventListener('pointerleave', () => {
+    clearTimeout(layoutOpenTimer);
+    layoutCloseTimer = setTimeout(() => closeLayoutPresets(), 220);
+  });
+  layoutPopover.addEventListener('pointerenter', () => clearTimeout(layoutCloseTimer));
+  layoutPopover.addEventListener('pointerleave', () => { layoutCloseTimer = setTimeout(() => closeLayoutPresets(), 220); });
+  layoutPopover.addEventListener('focusout', e => {
+    if (!layoutPopover.contains(e.relatedTarget)) closeLayoutPresets();
+  });
+  layoutPopover.addEventListener('click', e => {
+    const button = e.target.closest('[data-panel-layout]');
+    if (!button || button.disabled) return;
+    animatePanelWidth(layoutWidth(button.dataset.panelLayout), button.dataset.panelLayout);
+    closeLayoutPresets(true);
+  });
+  document.addEventListener('pointerdown', e => {
+    if (!layoutPopover.contains(e.target) && !panelResizer.contains(e.target)) closeLayoutPresets();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !layoutPopover.hidden) { e.preventDefault(); closeLayoutPresets(true); }
+  });
+  const panelLimits = () => {
+    const max = Math.max(320, window.innerWidth - 160);
+    return { min: Math.min(600, max), max };
+  };
+  function setPanelWidth(width, preset = null) {
+    selectedPanelLayout = preset;
+    const { min, max } = panelLimits();
+    const next = Math.round(Math.max(min, Math.min(max, width)));
+    document.documentElement.style.setProperty('--panel-width', next + 'px');
+    panelResizer.setAttribute('aria-valuemin', min);
+    panelResizer.setAttribute('aria-valuemax', max);
+    panelResizer.setAttribute('aria-valuenow', next);
+    panelResizer.setAttribute('aria-valuetext', next + ' pixels');
+    updateLayoutPresets(next);
+    map.resize();
+  }
+  function stopPanelAnimation() {
+    if (panelAnimationFrame) cancelAnimationFrame(panelAnimationFrame);
+    panelAnimationFrame = 0;
+    if (panelAnimationRender) map.off('render', panelAnimationRender);
+    panelAnimationRender = null;
+  }
+  function animatePanelWidth(width, preset = null) {
+    stopPanelAnimation();
+    const { min, max } = panelLimits();
+    const target = Math.round(Math.max(min, Math.min(max, width)));
+    const from = homePanel.getBoundingClientRect().width;
+    if (Math.abs(target - from) < 1 || matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setPanelWidth(target, preset);
+      return;
+    }
+    const start = performance.now(), duration = 450;
+    // Keep the renderer queued after the width update, so a resized canvas is
+    // repainted before the browser presents the frame instead of flashing blank.
+    panelAnimationRender = () => { if (panelAnimationFrame) map.triggerRepaint(); };
+    map.on('render', panelAnimationRender);
+    const tick = now => {
+      const progress = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      panelAnimationFrame = progress < 1 ? requestAnimationFrame(tick) : 0;
+      setPanelWidth(from + (target - from) * eased, preset);
+      if (progress === 1) stopPanelAnimation();
+    };
+    panelAnimationFrame = requestAnimationFrame(tick);
+    map.triggerRepaint();
+  }
+  panelResizer.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    stopPanelAnimation();
+    panelResizer.focus();
+    panelDragStartX = e.clientX;
+    panelDragStartWidth = homePanel.getBoundingClientRect().width;
+    panelWasDragged = false;
+    panelPopupWasOpen = !layoutPopover.hidden;
+    closeLayoutPresets();
+    panelResizer.setPointerCapture(e.pointerId);
+    document.body.classList.add('resizing-panel');
+  });
+  panelResizer.addEventListener('pointermove', e => {
+    if (!panelResizer.hasPointerCapture(e.pointerId)) return;
+    const delta = e.clientX - panelDragStartX;
+    if (Math.abs(delta) > 3) panelWasDragged = true;
+    if (panelWasDragged) setPanelWidth(panelDragStartWidth + delta);
+  });
+  function endPanelResize(e) {
+    if (panelResizer.hasPointerCapture(e.pointerId)) panelResizer.releasePointerCapture(e.pointerId);
+    document.body.classList.remove('resizing-panel');
+    if (e.type === 'pointerup' && !panelWasDragged && !panelPopupWasOpen) openLayoutPresets();
+  }
+  panelResizer.addEventListener('pointerup', endPanelResize);
+  panelResizer.addEventListener('pointercancel', endPanelResize);
+  panelResizer.addEventListener('lostpointercapture', () => document.body.classList.remove('resizing-panel'));
+  panelResizer.addEventListener('dblclick', () => {
+    animatePanelWidth(898);
+  });
+  panelResizer.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLayoutPresets(true); return; }
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    e.preventDefault();
+    const { min, max } = panelLimits();
+    const step = e.shiftKey ? 40 : 20;
+    const width = homePanel.getBoundingClientRect().width;
+    animatePanelWidth(e.key === 'Home' ? min : e.key === 'End' ? max : width + (e.key === 'ArrowLeft' ? -step : step));
+  });
+  window.addEventListener('resize', () => { stopPanelAnimation(); setPanelWidth(selectedPanelLayout ? layoutWidth(selectedPanelLayout) : homePanel.getBoundingClientRect().width, selectedPanelLayout); });
+  setPanelWidth(homePanel.getBoundingClientRect().width);
+
+  const homeContentEl = document.querySelector('.home-content');
+  const answerContent = document.getElementById('answer-content');
+  const answerNavTitle = document.getElementById('answer-nav-title');
+  const answerScroll = document.getElementById('answer-scroll');
+  const homeNavItem = document.querySelector('.sidebar-nav-item[title="Home"]');
+  const HOME_PLACEHOLDER = homeInput.placeholder;
+  let inAnswerMode = false;
+
+  // mock answer generator — stands in for a real backend response
+  function buildAnswer(query) {
+    const heading = query.charAt(0).toUpperCase() + query.slice(1);
+    const paras = [
+      'Based on the available zoning, market and parcel data for this area, here is a comprehensive breakdown of what I found. The location shows strong fundamentals across the parameters you care about.',
+      'Several nearby parcels are eligible for an ADU (Accessory Dwelling Unit) of up to 800 sq ft, which could represent a meaningful rental-income opportunity. Comparable sales and current listings suggest pricing remains below the broader submarket.'
+    ];
+    return { heading, paras };
+  }
+
+  function renderAnswer(query) {
+    const { heading, paras } = buildAnswer(query);
+
+    // the user's own message stays in the conversation, above the AI reply
+    const userMsg = document.createElement('div');
+    userMsg.className = 'answer-user answer-rise';
+    userMsg.style.animationDelay = '0s';
+    const uAvatar = document.createElement('div');
+    uAvatar.className = 'answer-user-avatar';
+    uAvatar.textContent = (document.querySelector('.sidebar-user')?.textContent || 'V').trim();
+    const uText = document.createElement('div');
+    uText.className = 'answer-user-text';
+    uText.textContent = query;
+    userMsg.appendChild(uAvatar);
+    userMsg.appendChild(uText);
+    answerContent.appendChild(userMsg);
+
+    const block = document.createElement('div');
+    block.className = 'answer-block';
+    const avatar = document.createElement('div');
+    avatar.className = 'answer-avatar answer-rise';
+    avatar.style.animationDelay = '0.12s';
+    avatar.innerHTML = '<img src="geolava-assets/Geolava-assistant.png" alt="">';
+    block.appendChild(avatar);
+
+    // word-by-word blur reveal — staggered across the heading then the body
+    const STEP = 70;   // ms between words
+    let wordIdx = 0;
+    const fillWords = (el, text) => {
+      el.innerHTML = text.split(/\s+/).map(w =>
+        `<span class="blur-word" style="transition-delay:${(wordIdx++) * STEP}ms">${w}</span>`
+      ).join(' ');
+    };
+
+    const h1 = document.createElement('h1');
+    h1.className = 'answer-title';
+    fillWords(h1, heading);
+    block.appendChild(h1);
+
+    const body = document.createElement('div');
+    body.className = 'answer-body';
+    paras.forEach(text => {
+      const p = document.createElement('p');
+      fillWords(p, text);
+      body.appendChild(p);
+    });
+    block.appendChild(body);
+    answerContent.appendChild(block);
+    answerScroll.scrollTo({ top: answerScroll.scrollHeight, behavior: 'smooth' });
+
+    // kick off the reveal on the next frame
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      block.querySelectorAll('.blur-word').forEach(s => s.classList.add('in'));
+    }));
+  }
+
+  function enterAnswerMode(query) {
+    answerNavTitle.textContent = query;
+    if (!inAnswerMode) {
+      inAnswerMode = true;
+      clearActiveModes();
+      homePanel.classList.add('answer-mode');
+      document.body.classList.add('answer-open');
+      resizeMapDuring(760);                       // follow the widening panel
+      homeNavItem.classList.remove('active');   // Home is no longer the current view
+      homeInput.placeholder = "What's next boss?";
+      // remove the intro/cards from layout once they've faded up
+      homeContentEl.addEventListener('transitionend', function done(e) {
+        if (e.propertyName === 'transform') {
+          homeContentEl.classList.add('gone');
+          homeContentEl.removeEventListener('transitionend', done);
+        }
+      });
+    }
+    renderAnswer(query);
+  }
+
+  function sendHome() {
+    const query = homeInput.value.trim();
+    if (!query) return;
+    geocodeAndFly(query);
+    enterAnswerMode(query);
+    homeInput.value = '';
+    homeChat.classList.remove('has-text');
+  }
+  homeSend.addEventListener('click', sendHome);
+
+  // ── Home nav → return to the starting (cards) stage ──
+  function exitAnswerMode() {
+    if (!inAnswerMode) return;
+    inAnswerMode = false;
+    homePanel.classList.remove('answer-mode');
+    document.body.classList.remove('answer-open');
+    resizeMapDuring(760);
+    homeNavItem.classList.add('active');
+    homeInput.placeholder = HOME_PLACEHOLDER;
+    homeContentEl.classList.remove('gone');   // bring the intro + cards back in
+    answerContent.innerHTML = '';             // clear the conversation
+    answerNavTitle.textContent = '';
+    answerScroll.scrollTop = 0;
+  }
+  homeNavItem.addEventListener('click', exitAnswerMode);
+  // turn off any active mode (draw / comment / selected card)
+  function clearActiveModes() {
+    drawChipSlot.classList.remove('show');
+    exitDrawMode();
+    if (commentMode) endComment();
+    homeCards.forEach(c => c.classList.remove('selected'));
+  }
+
+  let lastBackspaceAt = 0;
+  homeInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') sendHome();
+    // "/" on an empty input opens the modes popover (slash-command)
+    if (e.key === '/' && !homeInput.value.trim()) {
+      e.preventDefault();
+      setAddPopover(true);
+    }
+    // double-Backspace on an empty input turns off any picked mode
+    if (e.key === 'Backspace' && !homeInput.value) {
+      const now = Date.now();
+      if (now - lastBackspaceAt < 500) {
+        clearActiveModes();
+        lastBackspaceAt = 0;
+      } else {
+        lastBackspaceAt = now;
+      }
+    }
+  });
+
+  // ──────────────────────────────────────────────
+  //  Comment / Quick Ask (ported from the map project)
+  //  Triggered by the Pick card, the "Comment" popover item, or "C"
+  // ──────────────────────────────────────────────
+  const quickAskPopup = document.getElementById('quick-ask-popup');
+  const quickAskDot = document.getElementById('quick-ask-dot');
+  const quickAskInput = document.getElementById('quick-ask-input');
+  const quickAskInputWrap = document.getElementById('quick-ask-input-wrap');
+  const quickAskSend = document.getElementById('quick-ask-send');
+  const panelRightEdge = () => homePanel.getBoundingClientRect().right;
+  let commentMode = false;        // armed (following cursor) or placed
+  let commentPlaced = false;      // input shown at a fixed point
+  let quickAskLottieAnim = null;
+  let cursorX = window.innerWidth / 2, cursorY = window.innerHeight / 2;
+
+  document.addEventListener('mousemove', (e) => {
+    cursorX = e.clientX; cursorY = e.clientY;
+    if (commentMode && !commentPlaced) followCursor();
+  });
+
+  const pickCard = () => document.querySelector('.home-card[data-action="pick"]');
+
+  function loadCommentLottie() {
+    if (!quickAskLottieAnim && window.lottie) {
+      quickAskLottieAnim = lottie.loadAnimation({
+        container: document.getElementById('quick-ask-lottie'),
+        renderer: 'svg', loop: true, autoplay: true,
+        path: 'Assistant - Typing Right Thinking.json'
+      });
+    } else if (quickAskLottieAnim) {
+      quickAskLottieAnim.play();
+    }
+  }
+
+  // entry point — also marks the Pick card active
+  function openComment() {
+    homeCards.forEach(c => c.classList.remove('selected'));
+    pickCard()?.classList.add('selected');
+    drawChipSlot.classList.remove('show');
+    exitDrawMode();
+    armComment();
+  }
+
+  // arm: dot + assistant avatar follow the cursor (input hidden)
+  function armComment() {
+    if (commentMode) return;
+    commentMode = true;
+    commentPlaced = false;
+    setMapInteractions(false);
+    loadCommentLottie();
+    quickAskInput.value = '';
+    quickAskInputWrap.classList.remove('has-text');
+    quickAskPopup.classList.remove('placing');
+    quickAskPopup.classList.add('armed', 'visible');
+    document.body.classList.add('commenting');   // hide OS cursor over the map
+    commentChipSlot.classList.add('show');        // purple comment chip in the input
+    requestAnimationFrame(() => requestAnimationFrame(followCursor));
+  }
+
+  // follow the cursor — but only over the map; hidden on the panel side
+  function followCursor() {
+    const onMap = cursorX > panelRightEdge();
+    quickAskDot.classList.toggle('active', onMap);
+    quickAskPopup.classList.toggle('active', onMap);
+    if (!onMap) return;
+    quickAskDot.style.left = (cursorX - 6) + 'px';
+    quickAskDot.style.top = (cursorY - 6) + 'px';
+    // assistant sits below-right of the cursor, clear of the arrow
+    quickAskPopup.style.left = (cursorX + 16) + 'px';
+    quickAskPopup.style.top = (cursorY + 12) + 'px';
+  }
+
+  // place: fix the dot and reveal the input UNDER the assistant (no repositioning)
+  function placeComment(x, y) {
+    const rect = map.getContainer().getBoundingClientRect();
+    const location = map.unproject([x - rect.left, y - rect.top]);
+    window.dispatchEvent(new CustomEvent('geolava:pick', { detail: { lng: location.lng, lat: location.lat } }));
+    commentPlaced = true;
+    document.body.classList.remove('commenting');   // restore cursor so the input is usable
+    quickAskDot.style.left = (x - 6) + 'px';
+    quickAskDot.style.top = (y - 6) + 'px';
+    quickAskDot.classList.add('active');
+    // assistant stays where it is; the input just appears below it
+    quickAskPopup.classList.remove('armed');
+    requestAnimationFrame(() => quickAskInput.focus());
+  }
+
+  function endComment() {
+    quickAskPopup.classList.remove('active');
+    quickAskDot.classList.remove('active');
+    setTimeout(() => {
+      quickAskPopup.classList.remove('visible', 'armed', 'placing');
+      quickAskInput.value = '';
+      quickAskInputWrap.classList.remove('has-text');
+      if (quickAskLottieAnim) quickAskLottieAnim.pause();
+    }, 250);
+    commentMode = false;
+    commentPlaced = false;
+    document.body.classList.remove('commenting');
+    commentChipSlot.classList.remove('show');
+    setMapInteractions(true);
+    pickCard()?.classList.remove('selected');
+  }
+  function closeQuickAsk() { if (commentMode) endComment(); }
+
+  function quickAskSubmit() {
+    const text = quickAskInput.value.trim();
+    if (!text) return;
+
+    const inputRect = quickAskInput.getBoundingClientRect();
+    const flyEl = document.createElement('div');
+    flyEl.className = 'quick-ask-flying';
+    flyEl.textContent = text;
+    flyEl.style.left = inputRect.left + 'px';
+    flyEl.style.top = inputRect.top + 'px';
+    document.body.appendChild(flyEl);
+
+    endComment();
+
+    // fly the comment into the chat input
+    const chatRect = homeChat.getBoundingClientRect();
+    const targetX = chatRect.left + 80;
+    const targetY = chatRect.top + chatRect.height / 2 - 8;
+    requestAnimationFrame(() => {
+      flyEl.style.left = targetX + 'px';
+      flyEl.style.top = targetY + 'px';
+      flyEl.classList.add('fly');
+    });
+    setTimeout(() => {
+      flyEl.remove();
+      homeInput.value = text;
+      homeInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }, 600);
+  }
+
+  // left-click on the map places the comment; once placed, click-outside closes
+  document.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    if (commentMode && !commentPlaced) {
+      if (e.clientX > panelRightEdge() && !quickAskPopup.contains(e.target)) placeComment(e.clientX, e.clientY);
+      return;
+    }
+    if (commentMode && commentPlaced && !quickAskPopup.contains(e.target)) endComment();
+  });
+
+  // Single-key map tools are available outside text controls.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (commentMode || drawMode) { e.preventDefault(); clearActiveModes(); }
+      return;
+    }
+    if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+    if (e.key.toLowerCase() === 'c' && !commentMode) { e.preventDefault(); setAddPopover(false); openComment(); }
+    if (e.key.toLowerCase() === 'd' && !drawMode) { e.preventDefault(); addPopover.querySelector('[data-action="draw"]').click(); }
+  });
+
+  quickAskInput.addEventListener('input', () => {
+    quickAskInputWrap.classList.toggle('has-text', quickAskInput.value.trim().length > 0);
+  });
+  quickAskSend.addEventListener('click', quickAskSubmit);
+  quickAskInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && quickAskInput.value.trim()) quickAskSubmit();
+  });
+
+  // ──────────────────────────────────────────────
+  //  Draw on the map (ported from the map project)
+  // ──────────────────────────────────────────────
+  const drawCanvas = document.getElementById('draw-canvas');
+  const dctx = drawCanvas.getContext('2d');
+  const areaPillsRow = document.getElementById('area-pills-row');
+  const areaPillsInner = document.getElementById('area-pills-inner');
+  const areaPillsContent = document.getElementById('area-pills-content');
+
+  let drawMode = false;
+  let isDrawing = false;
+  let drawPoints = [];
+  let areaCount = 0;
+  const areas = {};
+  let activeAreaId = null;
+
+  function resizeCanvas() {
+    drawCanvas.width = window.innerWidth;
+    drawCanvas.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+
+  function setMapInteractions(enabled) {
+    const fns = ['boxZoom', 'scrollZoom', 'dragPan', 'dragRotate', 'doubleClickZoom', 'touchZoomRotate'];
+    fns.forEach(f => enabled ? map[f].enable() : map[f].disable());
+  }
+
+  function enterDrawMode() {
+    drawMode = true;
+    drawCanvas.style.display = 'block';
+    setMapInteractions(false);
+  }
+
+  function exitDrawMode() {
+    drawMode = false;
+    isDrawing = false;
+    drawPoints = [];
+    dctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+    drawCanvas.style.display = 'none';
+    setMapInteractions(true);
+  }
+
+  drawCanvas.addEventListener('mousedown', (e) => {
+    if (!drawMode) return;
+    isDrawing = true;
+    drawPoints = [{ x: e.clientX, y: e.clientY }];
+    dctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+  });
+
+  drawCanvas.addEventListener('mousemove', (e) => {
+    if (!isDrawing) return;
+    drawPoints.push({ x: e.clientX, y: e.clientY });
+    renderDrawing();
+  });
+
+  drawCanvas.addEventListener('mouseup', () => {
+    if (!isDrawing) return;
+    isDrawing = false;
+
+    if (drawPoints.length < 10) {
+      dctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+      drawPoints = [];
+      return;
+    }
+    // shape must be roughly closed (start & end within 80px)
+    const first = drawPoints[0];
+    const last = drawPoints[drawPoints.length - 1];
+    const dist = Math.sqrt((first.x - last.x) ** 2 + (first.y - last.y) ** 2);
+    if (dist > 80) {
+      dctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+      drawPoints = [];
+      return;
+    }
+    drawPoints.push(drawPoints[0]);
+    finishArea();
+  });
+
+  function renderDrawing() {
+    dctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+    if (drawPoints.length < 2) return;
+    dctx.beginPath();
+    dctx.moveTo(drawPoints[0].x, drawPoints[0].y);
+    for (let i = 1; i < drawPoints.length; i++) dctx.lineTo(drawPoints[i].x, drawPoints[i].y);
+    dctx.strokeStyle = '#FFFFFF';
+    dctx.lineWidth = 4;
+    dctx.setLineDash([]);
+    dctx.stroke();
+    dctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    dctx.fill();
+  }
+
+  function finishArea() {
+    areaCount++;
+    const areaId = 'area-' + areaCount;
+
+    // The draw canvas spans the whole viewport, but map.unproject expects
+    // coordinates relative to the map container (which is offset by the
+    // left-hand panel). Subtract the container origin so shapes land where
+    // they were drawn instead of off-screen.
+    const mapRect = map.getContainer().getBoundingClientRect();
+    const coords = drawPoints.map(p => {
+      const lngLat = map.unproject([p.x - mapRect.left, p.y - mapRect.top]);
+      return [lngLat.lng, lngLat.lat];
+    });
+
+    addAreaToMap(areaId, coords);
+    addAreaPill(areaId, areaCount);
+    window.dispatchEvent(new CustomEvent('geolava:area', { detail: { coords, id: areaId } }));
+
+    // stay in draw mode so more areas can be drawn — just clear the current stroke
+    dctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+    drawPoints = [];
+  }
+
+  function addAreaToMap(id, coords) {
+    const sourceId = id + '-source';
+    const lineId = id + '-line';
+
+    const polygon = turf.polygon([coords]);
+    const area = turf.area(polygon);
+    const maxInset = Math.sqrt(area) * 0.15;
+    const steps = 30;
+
+    const buffers = [polygon];
+    for (let i = 1; i <= steps; i++) {
+      const d = (maxInset / steps) * i;
+      const buffered = turf.buffer(polygon, -d / 1000, { units: 'kilometers' });
+      if (buffered) buffers.push(buffered);
+    }
+
+    const fillIds = [];
+    for (let i = 0; i < buffers.length - 1; i++) {
+      const outer = buffers[i].geometry.coordinates[0];
+      const inner = buffers[i + 1].geometry.coordinates[0].slice().reverse();
+      const donut = turf.polygon([outer, inner]);
+      const opacity = 0.3 * ((buffers.length - 1 - i) / (buffers.length - 1));
+
+      const ringSourceId = id + '-ring-' + i;
+      const ringFillId = id + '-ringfill-' + i;
+      map.addSource(ringSourceId, { type: 'geojson', data: donut });
+      map.addLayer({
+        id: ringFillId, type: 'fill', source: ringSourceId,
+        paint: { 'fill-color': '#FFFFFF', 'fill-opacity': opacity }
+      });
+      fillIds.push({ sourceId: ringSourceId, fillId: ringFillId });
+    }
+
+    map.addSource(sourceId, { type: 'geojson', data: polygon });
+    map.addLayer({
+      id: lineId, type: 'line', source: sourceId,
+      paint: { 'line-color': '#FFFFFF', 'line-width': 4 }
+    });
+
+    areas[id] = { sourceId, lineId, fillIds, coords };
+    savedAreas[id] = { coords };
+  }
+
+  function addAreaPill(id, num) {
+    const pill = document.createElement('div');
+    pill.className = 'area-pill';
+    pill.dataset.areaId = id;
+    pill.setAttribute('role', 'button');
+    pill.innerHTML = `
+      <span class="area-pill-zone-icon" aria-hidden="true">
+        <svg viewBox="0 0 16 16" fill="none"><path d="M8.38825 1.51009C10.8747 1.41482 13.4612 3.13899 13.7867 6.3864C13.9311 7.82784 13.3847 9.23162 12.6356 10.4274C11.8817 11.6309 10.879 12.6934 9.99307 13.4801C9.1102 14.264 7.81516 14.0075 7.18187 13.1149L5.07575 10.1462C4.99003 10.0254 4.83279 9.97817 4.69489 10.0322C3.81036 10.3797 2.8153 9.91306 2.51716 9.01075L1.30231 5.33236C0.959405 4.29393 1.514 3.15776 2.57901 2.82715C3.36328 2.58377 4.42203 2.2717 5.47224 2.0127C6.50918 1.75697 7.58595 1.54087 8.38825 1.51009ZM8.43968 2.84213C7.78322 2.86728 6.81914 3.05347 5.79125 3.30697C4.77646 3.55724 3.7455 3.86123 2.97419 4.10059C2.64196 4.20379 2.45272 4.56356 2.56859 4.91439L3.78343 8.59213C3.84147 8.76785 4.03502 8.85901 4.20726 8.79134C4.91561 8.51311 5.72254 8.75342 6.16299 9.37403L8.26976 12.3434C8.49438 12.6599 8.8826 12.6838 9.1083 12.4834C9.9323 11.7517 10.8395 10.7838 11.5061 9.71973C12.1776 8.64781 12.5628 7.54593 12.4599 6.51921C12.2105 4.03189 10.283 2.77157 8.43968 2.84213Z" fill="currentColor"/></svg>
+      </span>
+      <span class="area-pill-label">Zone ${num}</span>
+      <button class="area-pill-x" type="button" title="Remove area" aria-label="Remove area">
+        <svg viewBox="0 0 15.4141 15.4141" fill="none"><path d="M15.4141 1.41406L9.12109 7.70703L15.4141 14L14 15.4141L7.70703 9.12109L1.41406 15.4141L0 14L6.29297 7.70703L0 1.41406L1.41406 0L7.70703 6.29297L14 0L15.4141 1.41406Z" fill="currentColor"/></svg>
+      </button>
+    `;
+
+    pill.querySelector('.area-pill-x').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (activeAreaId === id) activeAreaId = null;
+      removeArea(id);
+      const isLast = [...areaPillsContent.querySelectorAll('.area-pill')].filter(p => p !== pill).length === 0;
+      if (isLast) {
+        areaPillsRow.classList.remove('has-pills');   // notch closes (0.7s ease-in)
+        areaPillsInner.style.maxHeight = '0px';
+        setTimeout(() => pill.remove(), 220);         // drop the chip after it has collapsed
+      } else {
+        pill.remove();                                // others remain; notch stays open
+        areaPillsInner.style.maxHeight = areaPillsContent.offsetHeight + 'px';
+      }
+    });
+    pill.addEventListener('click', () => highlightArea(id));
+    areaPillsContent.appendChild(pill);
+    areaPillsRow.classList.add('has-pills');
+    areaPillsInner.style.maxHeight = areaPillsContent.offsetHeight + 'px';   // animate to real content height
+  }
+
+  function removeArea(id) {
+    window.dispatchEvent(new CustomEvent('geolava:area-removed', { detail: { id } }));
+    const area = areas[id];
+    if (!area) return;
+    if (map.getLayer(area.lineId)) map.removeLayer(area.lineId);
+    if (area.fillIds) {
+      area.fillIds.forEach(r => {
+        if (map.getLayer(r.fillId)) map.removeLayer(r.fillId);
+        if (map.getSource(r.sourceId)) map.removeSource(r.sourceId);
+      });
+    }
+    if (map.getSource(area.sourceId)) map.removeSource(area.sourceId);
+    delete areas[id];
+    delete savedAreas[id];
+  }
+
+  function setAreaColors(area, color, opacityScale) {
+    if (area.fillIds) {
+      const steps = area.fillIds.length;
+      area.fillIds.forEach((r, i) => {
+        map.setPaintProperty(r.fillId, 'fill-color', color);
+        map.setPaintProperty(r.fillId, 'fill-opacity', opacityScale * ((steps - 1 - i) / (steps - 1 || 1)));
+      });
+    }
+    map.setPaintProperty(area.lineId, 'line-color', color);
+  }
+
+  function highlightArea(id) {
+    if (activeAreaId && areas[activeAreaId]) {
+      setAreaColors(areas[activeAreaId], '#FFFFFF', 0.2);
+      document.querySelector(`.area-pill[data-area-id="${activeAreaId}"]`)?.classList.remove('selected');
+    }
+    if (activeAreaId === id) { activeAreaId = null; return; }
+
+    activeAreaId = id;
+    const area = areas[id];
+    if (!area) return;
+    setAreaColors(area, '#6266E6', 0.3);
+    document.querySelector(`.area-pill[data-area-id="${id}"]`)?.classList.add('selected');
+
+    const coords = area.coords;
+    const bounds = coords.reduce((b, c) => b.extend(c), new mapboxgl.LngLatBounds(coords[0], coords[0]));
+    map.fitBounds(bounds, { padding: { top: 120, bottom: 180, left: 40, right: 40 }, duration: 800 });
+  }
+
+  // Re-add drawn areas after a base-style switch
+  let savedAreas = {};
+  map.on('style.load', () => {
+    Object.entries(savedAreas).forEach(([id, data]) => {
+      if (!areas[id]) return;
+      addAreaToMap(id, data.coords);
+    });
+  });
+</script>
+<script src="workspace.js"></script>
+</body>
+</html>

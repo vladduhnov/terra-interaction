@@ -1,0 +1,2239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script src="config.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,200;9..40,300;9..40,400;9..40,700&display=swap" rel="stylesheet">
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.9.4/mapbox-gl.css" rel="stylesheet">
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.9.4/mapbox-gl.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@7/turf.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; font-family: 'DM Sans', sans-serif; }
+  #map { width: 100%; height: 100%; }
+
+  /* Hide default mapbox controls */
+  .mapboxgl-ctrl-top-right { display: none; }
+
+  /* ── Left Sidebar ── */
+  .sidebar {
+    position: absolute;
+    top: 24px;
+    left: 24px;
+    width: 64px;
+    height: calc(100% - 48px);
+    background: #FEFEFB;
+    border: 1px solid #DFDFDE;
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 19px 0;
+    z-index: 10;
+  }
+
+  .sidebar-logo {
+    width: 36px;
+    height: 36px;
+    margin-bottom: 74px;
+  }
+
+  .sidebar-nav {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+    position: relative;
+  }
+
+  .sidebar-nav-item {
+    width: 24px;
+    height: 24px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    background: none;
+    border: none;
+    padding: 0;
+  }
+
+  .sidebar-nav-item.active::before {
+    content: '';
+    position: absolute;
+    left: -20px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 37px;
+    background: #282423;
+    border-radius: 7px;
+  }
+
+  .sidebar-nav-item svg { display: block; }
+
+  .sidebar-bottom {
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .sidebar-user {
+    width: 32px;
+    height: 32px;
+    background: #F2F2EC;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 400;
+    color: #282423;
+  }
+
+  /* ── Map Type Switch ── */
+  .map-switch {
+    position: absolute;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    background: rgba(40, 36, 35, 0.4);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 0.5px solid rgba(255, 255, 255, 0.5);
+    border-radius: 999px;
+    z-index: 10;
+  }
+
+  .map-switch-btn {
+    height: 36px;
+    padding: 8px 16px;
+    border: none;
+    border-radius: 999px;
+    background: none;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: #FEFEFB;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+  }
+
+  .map-switch-btn.active {
+    background: #fff;
+    color: #282423;
+  }
+
+  /* ── Zoom + Compass + Draw Controls (right side) ── */
+  .zoom-controls {
+    position: absolute;
+    top: 24px;
+    right: 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(25px);
+    -webkit-backdrop-filter: blur(25px);
+    border: 0.5px solid rgba(255, 255, 255, 0.4);
+    border-radius: 999px;
+    overflow: hidden;
+    z-index: 10;
+  }
+
+  .zoom-btn {
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    transition: background 0.15s;
+  }
+
+  .zoom-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .zoom-btn svg { display: block; }
+
+  .compass-btn {
+    position: absolute;
+    top: 120px;
+    right: 24px;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(25px);
+    -webkit-backdrop-filter: blur(25px);
+    border: 0.5px solid rgba(255, 255, 255, 0.4);
+    border-radius: 999px;
+    cursor: pointer;
+    z-index: 10;
+    padding: 0;
+    transition: background 0.15s;
+  }
+
+  .compass-btn:hover {
+    background: rgba(0, 0, 0, 0.55);
+  }
+
+  .compass-btn svg {
+    display: block;
+    transition: transform 0.3s;
+  }
+
+  .draw-btn {
+    position: absolute;
+    top: 172px;
+    right: 24px;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(25px);
+    -webkit-backdrop-filter: blur(25px);
+    border: 0.5px solid rgba(255, 255, 255, 0.4);
+    border-radius: 999px;
+    cursor: pointer;
+    z-index: 10;
+    padding: 0;
+    transition: background 0.15s;
+  }
+
+  .draw-btn:hover {
+    background: rgba(0, 0, 0, 0.55);
+  }
+
+  .draw-btn.active {
+    background: rgba(255, 255, 255, 0.9);
+    border-color: rgba(255, 255, 255, 0.9);
+  }
+
+  .draw-btn img {
+    display: block;
+    filter: brightness(0) invert(1);
+    transition: filter 0.15s;
+  }
+
+  .draw-btn.active img {
+    filter: none;
+  }
+
+  /* ── Draw Canvas Overlay ── */
+  #draw-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 5;
+    cursor: url('Icons/cursor-pencil.svg') 2 22, crosshair;
+    display: none;
+  }
+
+  /* ── Quick Ask Popup ── */
+  .quick-ask-popup {
+    position: fixed;
+    z-index: 100;
+    display: none;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    opacity: 0;
+    transform: translateY(8px) scale(0.95);
+    transition: opacity 0.25s ease, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .quick-ask-popup.visible {
+    display: flex;
+  }
+
+  .quick-ask-popup.active {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  .quick-ask-lottie {
+    width: 80px;
+    height: 80px;
+    margin-left: -16px;
+  }
+
+  .quick-ask-input-wrap {
+    display: flex;
+    align-items: center;
+    background: #FEFEFB;
+    border: 1px solid #BEBEBD;
+    border-radius: 12px;
+    padding: 8px 10px 8px 16px;
+    width: 360px;
+    gap: 10px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+  }
+
+  .quick-ask-input-wrap input {
+    flex: 1;
+    border: none;
+    background: none;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    font-weight: 300;
+    color: #282423;
+    letter-spacing: -0.28px;
+    outline: none;
+  }
+
+  .quick-ask-input-wrap input::placeholder {
+    color: #939391;
+  }
+
+  .quick-ask-send {
+    width: 36px;
+    height: 36px;
+    border: none;
+    background: #EEEDEA;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.15s;
+  }
+
+  .quick-ask-input-wrap.has-text .quick-ask-send {
+    background: #6266E6;
+  }
+
+  .quick-ask-input-wrap.has-text .quick-ask-send svg path {
+    fill: #FFFFFF;
+  }
+
+  .quick-ask-dot {
+    position: fixed;
+    width: 12px;
+    height: 12px;
+    background: #FFFFFF;
+    border-radius: 50%;
+    z-index: 99;
+    pointer-events: none;
+    box-shadow: 0 0 16px rgba(255,255,255,0.6);
+    opacity: 0;
+    transform: scale(0);
+    transition: opacity 0.2s ease, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .quick-ask-dot.active {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  /* Flying text animation */
+  .quick-ask-flying {
+    position: fixed;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    font-weight: 300;
+    color: #282423;
+    pointer-events: none;
+    z-index: 200;
+    transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    white-space: nowrap;
+    opacity: 1;
+  }
+
+  .quick-ask-flying.fly {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+
+  /* ── Chat Input ── */
+  .chat-input-wrapper {
+    position: absolute;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 580px;
+    transition: width 0.3s ease;
+    z-index: 10;
+  }
+
+  .chat-input {
+    position: relative;
+    min-height: 64px;
+    background: #FEFEFB;
+    border: 1px solid #BEBEBD;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    padding: 10px 12px 10px 20px;
+    gap: 12px;
+    z-index: 2;
+    flex-wrap: wrap;
+  }
+
+  .chat-lottie {
+    width: 72px;
+    height: 72px;
+    flex-shrink: 0;
+    margin: -24px -22px -24px -20px;
+  }
+
+  .chat-input-body {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .command-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: #6266E6;
+    border-radius: 6px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    color: #FFFFFF;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    animation: pillPop 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .command-pill .command-pill-close {
+    width: 14px;
+    height: 14px;
+    border: none;
+    background: rgba(255,255,255,0.25);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    transition: background 0.15s;
+  }
+
+  .command-pill .command-pill-close:hover {
+    background: rgba(255,255,255,0.4);
+  }
+
+  .command-pill .command-pill-close img {
+    display: block;
+    filter: brightness(0) invert(1);
+  }
+
+  @keyframes pillPop {
+    from { transform: scale(0.8); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+
+  .area-pills-row {
+    position: relative;
+    display: flex;
+    gap: 8px;
+    padding: 8px 14px;
+    background: #F7F6F1;
+    border: 1px solid #BEBEBD;
+    border-bottom: none;
+    border-radius: 12px 12px 0 0;
+    margin-bottom: -12px;
+    padding-bottom: 20px;
+    z-index: 1;
+  }
+
+  .area-pills-row:empty {
+    display: none;
+  }
+
+  .area-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px 6px 10px;
+    background: #DFE0F7;
+    border: none;
+    border-radius: 44px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    color: #6266E6;
+    letter-spacing: 1.32px;
+    text-transform: uppercase;
+    white-space: nowrap;
+    flex-shrink: 0;
+    line-height: 16px;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .area-pill.selected {
+    background: #6266E6;
+    color: #FFFFFF;
+  }
+
+  .area-pill.selected .area-pill-close img {
+    filter: brightness(0) invert(1);
+  }
+
+  .area-pill-close {
+    width: 12px;
+    height: 12px;
+    border: none;
+    background: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border-radius: 50%;
+    transition: opacity 0.15s;
+    opacity: 0.7;
+  }
+
+  .area-pill-close img {
+    display: block;
+    filter: brightness(0) saturate(100%) invert(37%) sepia(96%) saturate(1637%) hue-rotate(228deg) brightness(95%) contrast(88%);
+  }
+
+  .area-pill-close:hover {
+    opacity: 1;
+  }
+
+  .chat-input input {
+    flex: 1;
+    min-width: 80px;
+    border: none;
+    background: none;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 16px;
+    font-weight: 300;
+    color: #282423;
+    letter-spacing: -0.32px;
+    outline: none;
+  }
+
+  .chat-input input::placeholder {
+    color: #939391;
+  }
+
+  .chat-send {
+    width: 44px;
+    height: 44px;
+    background: #F7F6F1;
+    border: none;
+    border-radius: 37px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.15s;
+  }
+
+  .chat-send:hover {
+    background: #EEEDEA;
+  }
+
+  .chat-send svg { display: block; }
+  .chat-send svg path { transition: fill 0.2s; }
+
+  .chat-input-wrapper.active {
+    width: 960px;
+  }
+
+  .chat-input.has-text .chat-send {
+    background: #6266E6;
+  }
+
+  .chat-input.has-text .chat-send svg path {
+    fill: #FFFFFF;
+  }
+
+  /* ── Chat Panel ── */
+  .chat-panel {
+    position: absolute;
+    bottom: 104px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 960px;
+    height: 620px;
+    background: #FEFEFB;
+    border: 1px solid #DFDFDE;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    z-index: 10;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .chat-panel.open {
+    opacity: 1;
+    pointer-events: auto;
+    animation: panelSlideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  .chat-panel.closing {
+    animation: panelSlideDown 0.35s cubic-bezier(0.55, 0, 1, 0.45) forwards;
+  }
+
+  @keyframes panelSlideUp {
+    from { opacity: 0; transform: translateX(-50%) translateY(40px); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+  }
+
+  @keyframes panelSlideDown {
+    from { opacity: 1; transform: translateX(-50%) translateY(0); }
+    to   { opacity: 0; transform: translateX(-50%) translateY(60px); }
+  }
+
+  .chat-panel-fade {
+    position: relative;
+    height: 60px;
+    margin-bottom: -60px;
+    z-index: 1;
+    pointer-events: none;
+    mask-image: linear-gradient(to bottom, black, transparent);
+    -webkit-mask-image: linear-gradient(to bottom, black, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    background: linear-gradient(to bottom, rgba(254,254,251,0.8) 0%, transparent 100%);
+    flex-shrink: 0;
+  }
+
+  .chat-panel-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 36px 160px;
+    display: flex;
+    flex-direction: column;
+    gap: 48px;
+  }
+
+  .chat-msg {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    align-items: flex-start;
+  }
+
+  .chat-msg-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 400;
+    color: #282823;
+  }
+
+  .chat-msg-avatar.user {
+    background: #F2F2EC;
+  }
+
+  .chat-msg-avatar.assistant {
+    background: none;
+  }
+
+  .chat-msg-avatar.assistant img {
+    width: 100%;
+    height: 100%;
+  }
+
+  .chat-msg-text {
+    font-size: 16px;
+    font-weight: 400;
+    color: #282823;
+    line-height: 24px;
+  }
+
+  .chat-msg-heading {
+    font-size: 24px;
+    font-weight: 300;
+    color: #282823;
+    line-height: 28px;
+  }
+
+  .chat-msg-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .chat-area-card {
+    width: 100%;
+    background: #FEFEFB;
+    border: 1px solid #BEBEBD;
+    border-radius: 10px;
+    padding: 32px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 36px;
+    overflow: hidden;
+  }
+
+  .chat-area-card-label {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1.32px;
+    text-transform: uppercase;
+    color: #282823;
+    line-height: 16px;
+    font-feature-settings: 'calt' 0;
+  }
+
+  .chat-area-card-image {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .chat-area-card-image img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .chat-area-card-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+  }
+
+  .chat-area-card-row {
+    display: flex;
+    gap: 16px;
+  }
+
+  .chat-area-card-stat {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .chat-area-card-stat-label {
+    font-size: 12px;
+    font-weight: 400;
+    color: #939391;
+    line-height: 16px;
+  }
+
+  .chat-area-card-stat-value {
+    font-size: 20px;
+    font-weight: 300;
+    color: #282823;
+    line-height: 24px;
+    display: flex;
+    gap: 2px;
+    align-items: flex-end;
+  }
+
+  .chat-area-card-stat-unit {
+    font-size: 12px;
+    font-weight: 400;
+    color: #939391;
+    line-height: 16px;
+    padding-bottom: 1px;
+  }
+
+  .chat-area-card-stat-divider {
+    font-size: 12px;
+    font-weight: 400;
+    color: #DFDFDE;
+    line-height: 16px;
+    padding-bottom: 1px;
+  }
+
+  .card-fade-in {
+    opacity: 0;
+    transform: translateY(16px) scale(0.97);
+    animation: cardFadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  @keyframes cardFadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(16px) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  .chat-msg.fade-in {
+    opacity: 0;
+    transform: translateY(8px);
+    animation: msgFadeIn 0.4s ease-out forwards;
+  }
+
+  .chat-msg.fade-in .chat-msg-avatar {
+    opacity: 0;
+    animation: msgFadeIn 0.3s ease-out 0.1s forwards;
+  }
+
+  @keyframes msgFadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .chat-panel-nav {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 28px;
+    z-index: 2;
+    flex-shrink: 0;
+    border-bottom: 1px solid #DFDFDE;
+  }
+
+  .chat-panel-nav-left {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .chat-panel-nav-btn {
+    width: 44px;
+    height: 44px;
+    border: none;
+    background: #F7F6F1;
+    border-radius: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s;
+    padding: 0;
+  }
+
+  .chat-panel-nav-btn:hover {
+    background: #EEEDEA;
+  }
+
+  .chat-panel-nav-btn.with-label {
+    width: auto;
+    padding: 12px 20px;
+    gap: 8px;
+  }
+
+  .chat-panel-nav-btn.with-label span {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: #282823;
+    line-height: 1.1;
+  }
+
+  .chat-panel-close {
+    width: 44px;
+    height: 44px;
+    border: none;
+    background: #F7F6F1;
+    border-radius: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s;
+    padding: 0;
+  }
+
+  .chat-panel-close:hover {
+    background: #EEEDEA;
+  }
+
+  .chat-typing {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    padding: 4px 0;
+  }
+
+  .chat-typing-dot {
+    width: 6px;
+    height: 6px;
+    background: #939391;
+    border-radius: 50%;
+    animation: typing 1.2s infinite;
+  }
+
+  .chat-typing-dot:nth-child(2) { animation-delay: 0.2s; }
+  .chat-typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+  @keyframes typing {
+    0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+    30% { opacity: 1; transform: translateY(-3px); }
+  }
+
+  .blur-word {
+    display: inline-block;
+    opacity: 0;
+    filter: blur(8px);
+    transform: translateY(6px);
+    transition: opacity 500ms ease-out, filter 500ms ease-out, transform 500ms ease-out;
+  }
+
+  .blur-word.in {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+<canvas id="draw-canvas"></canvas>
+
+<!-- Left Sidebar -->
+<div class="sidebar">
+  <div class="sidebar-logo">
+    <img src="Icons/Geolava-Logo.svg" alt="Geolava" width="36" height="36">
+  </div>
+
+  <div class="sidebar-nav">
+    <button class="sidebar-nav-item active" title="Home">
+      <img src="Icons/home.svg" alt="Home" width="24" height="24">
+    </button>
+    <button class="sidebar-nav-item" title="History">
+      <img src="Icons/History.svg" alt="History" width="24" height="24">
+    </button>
+    <button class="sidebar-nav-item" title="Watchlist">
+      <img src="Icons/Watchlist.svg" alt="Watchlist" width="24" height="24">
+    </button>
+  </div>
+
+  <div class="sidebar-bottom">
+    <div class="sidebar-user">V</div>
+  </div>
+</div>
+
+<!-- Map Type Switch -->
+<div class="map-switch">
+  <button class="map-switch-btn active" id="btn-satellite">Satelite</button>
+  <button class="map-switch-btn" id="btn-map">Map</button>
+</div>
+
+<!-- Zoom Controls -->
+<div class="zoom-controls">
+  <button class="zoom-btn" id="zoom-in" title="Zoom in">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6.66671 12.9999V9.33325C6.66671 8.96506 6.36823 8.66659 6.00004 8.66659H2.33337C1.33337 8.66659 1.33337 8.21887 1.33337 7.66659C1.33337 7.1143 1.33337 6.66659 2.33337 6.66659H6.00004C6.36823 6.66659 6.66671 6.36811 6.66671 5.99992V2.33325C6.66671 1.78097 6.66671 1.33325 7.66671 1.33325C8.66671 1.33325 8.66671 1.78097 8.66671 2.33325V5.99992C8.66671 6.36811 8.96518 6.66659 9.33337 6.66659H13C14 6.66659 14 7.1143 14 7.66659C14 8.21887 14 8.66659 13 8.66659H9.33337C8.96518 8.66659 8.66671 8.96506 8.66671 9.33325V12.9999C8.66671 13.9999 8.21899 13.9999 7.66671 13.9999C7.11442 13.9999 6.66671 13.9999 6.66671 12.9999Z" fill="white"/></svg>
+  </button>
+  <button class="zoom-btn" id="zoom-out" title="Zoom out">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13 6.66675C14 6.66675 14 7.11446 14 7.66675C14 8.21903 14 8.66675 13 8.66675H2.33337C1.33337 8.66675 1.33337 8.21903 1.33337 7.66675C1.33337 7.11446 1.33337 6.66675 2.33337 6.66675H13Z" fill="white"/></svg>
+  </button>
+</div>
+
+<!-- Compass -->
+<button class="compass-btn" id="compass" title="Reset bearing">
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.7489 2.25124C13.6364 2.13859 13.4947 2.05953 13.3397 2.02293C13.1848 1.98634 13.0227 1.99366 12.8717 2.04407L5.15754 4.61546C5.03137 4.6576 4.91673 4.7285 4.82268 4.82256C4.72862 4.91662 4.65772 5.03125 4.61557 5.15742L2.04419 12.8716C1.99379 13.0226 1.98646 13.1847 2.02302 13.3397C2.05958 13.4946 2.13858 13.6364 2.25117 13.749C2.36376 13.8615 2.50548 13.9405 2.66045 13.9771C2.81542 14.0137 2.9775 14.0063 3.12854 13.9559L10.8427 11.3845C10.9689 11.3424 11.0835 11.2715 11.1776 11.1774C11.2716 11.0833 11.3425 10.9687 11.3847 10.8425L13.9561 3.12834C14.0064 2.97732 14.0136 2.81528 13.9771 2.66036C13.9405 2.50545 13.8615 2.36378 13.7489 2.25124ZM5.16115 11.4715C4.77028 11.6017 4.39845 11.2299 4.52873 10.839L5.85047 6.87368C5.968 6.52106 6.41553 6.41541 6.67836 6.67823L9.32225 9.32205C9.58509 9.58489 9.47942 10.0325 9.12677 10.15L5.16115 11.4715Z" fill="white"/></svg>
+</button>
+
+<!-- Draw Button -->
+<button class="draw-btn" id="draw-btn" title="Draw area">
+  <img src="Icons/pencil-icon.svg" width="16" height="16" alt="Draw">
+</button>
+
+<!-- Quick Ask -->
+<div class="quick-ask-dot" id="quick-ask-dot"></div>
+<div class="quick-ask-popup" id="quick-ask-popup">
+  <div class="quick-ask-lottie" id="quick-ask-lottie"></div>
+  <div class="quick-ask-input-wrap" id="quick-ask-input-wrap">
+    <input type="text" id="quick-ask-input" placeholder="Ask anything...">
+    <button class="quick-ask-send" id="quick-ask-send">
+      <svg width="14" height="14" viewBox="0 0 18 18" fill="none"><path d="M8.99732 1.05469C9.55993 1.05469 10.0121 1.30088 10.4146 1.62378C10.8001 1.9331 11.2238 2.38353 11.7197 2.90698L16.2915 7.73291L15.2031 8.76416L10.6306 3.93823C10.2603 3.54734 9.98029 3.25428 9.74732 3.03442V17.2485H8.24731V3.03442C8.01434 3.25428 7.73434 3.54734 7.36401 3.93823L2.7915 8.76416L1.70312 7.73291L6.2749 2.90698C6.7708 2.38353 7.19452 1.9331 7.58008 1.62378C7.98258 1.30088 8.4347 1.05469 8.99732 1.05469Z" fill="#BEBEBD"/></svg>
+    </button>
+  </div>
+</div>
+
+<!-- Chat Input -->
+<div class="chat-input-wrapper">
+  <div class="area-pills-row" id="area-pills-row"></div>
+  <div class="chat-input">
+    <div class="chat-lottie" id="chat-lottie"></div>
+    <div class="chat-input-body" id="chat-input-body">
+      <input type="text" id="chat-text" placeholder="Give me complete evaluation of the 2004 El Camino Real corridor">
+    </div>
+    <button class="chat-send">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M8.99732 1.05469C9.55993 1.05469 10.0121 1.30088 10.4146 1.62378C10.8001 1.9331 11.2238 2.38353 11.7197 2.90698L16.2915 7.73291L15.2031 8.76416L10.6306 3.93823C10.2603 3.54734 9.98029 3.25428 9.74732 3.03442V17.2485H8.24731V3.03442C8.01434 3.25428 7.73434 3.54734 7.36401 3.93823L2.7915 8.76416L1.70312 7.73291L6.2749 2.90698C6.7708 2.38353 7.19452 1.9331 7.58008 1.62378C7.98258 1.30088 8.4347 1.05469 8.99732 1.05469Z" fill="#BEBEBD"/></svg>
+    </button>
+  </div>
+</div>
+
+<!-- Chat Panel -->
+<div class="chat-panel" id="chat-panel">
+  <div class="chat-panel-nav">
+    <div class="chat-panel-nav-left">
+      <button class="chat-panel-nav-btn" title="Bookmark">
+        <img src="Icons/bookmark-icon.svg" width="16" height="16" alt="Bookmark">
+      </button>
+      <button class="chat-panel-nav-btn with-label" title="Share">
+        <img src="Icons/Share-icon.svg" width="18" height="18" alt="Share">
+        <span>Share</span>
+      </button>
+    </div>
+    <button class="chat-panel-close" id="chat-panel-close">
+      <img src="Icons/close-x-icon.svg" width="12" height="12" alt="Close">
+    </button>
+  </div>
+  <div class="chat-panel-fade"></div>
+  <div class="chat-panel-messages" id="chat-panel-messages"></div>
+</div>
+
+<script>
+  mapboxgl.accessToken = window.GEOLAVA_CONFIG?.mapboxAccessToken || '';
+
+  const STYLE_SATELLITE = 'mapbox://styles/mapbox/satellite-streets-v12';
+  const STYLE_MAP = 'mapbox://styles/vladduhnov/cminomcoe006p01s74jbd620u';
+
+  const map = new mapboxgl.Map({
+    container: 'map',
+    style: STYLE_SATELLITE,
+    center: [-73.98, 40.75],
+    zoom: 12,
+    pitch: 0,
+    bearing: 0,
+    preserveDrawingBuffer: true
+  });
+
+  // ── ZCTA Zip Code Boundaries ──
+  function addZCTALayer() {
+    if (map.getSource('zcta')) return;
+    try {
+      map.addSource('zcta', {
+        type: 'vector',
+        url: 'mapbox://vladduhnov.us-zcta-boundaries'
+      });
+
+      map.addLayer({
+        id: 'zcta-fill',
+        type: 'fill',
+        source: 'zcta',
+        'source-layer': 'zcta',
+        paint: {
+          'fill-color': '#6266E6',
+          'fill-opacity': 0
+        },
+        minzoom: 5
+      });
+
+      map.addLayer({
+        id: 'zcta-borders',
+        type: 'line',
+        source: 'zcta',
+        'source-layer': 'zcta',
+        paint: {
+          'line-color': 'rgba(255,255,255,0.6)',
+          'line-width': [
+            'interpolate', ['linear'], ['zoom'],
+            5, 0.5,
+            10, 1.5,
+            14, 2
+          ]
+        },
+        minzoom: 5
+      });
+
+      map.addLayer({
+        id: 'zcta-labels',
+        type: 'symbol',
+        source: 'zcta',
+        'source-layer': 'zcta',
+        layout: {
+          'text-field': ['get', 'ZCTA5CE20'],
+          'text-size': [
+            'interpolate', ['linear'], ['zoom'],
+            8, 11,
+            12, 14
+          ],
+          'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'],
+          'text-allow-overlap': false
+        },
+        paint: {
+          'text-color': '#FFFFFF',
+          'text-halo-color': 'rgba(0,0,0,0.5)',
+          'text-halo-width': 1.5
+        },
+        minzoom: 9
+      });
+
+      console.log('ZCTA layers added');
+    } catch(e) { console.warn('ZCTA layer error:', e); }
+  }
+
+  map.on('style.load', addZCTALayer);
+  map.on('load', addZCTALayer);
+
+  // Lottie animation in chat input
+  lottie.loadAnimation({
+    container: document.getElementById('chat-lottie'),
+    renderer: 'svg',
+    loop: true,
+    autoplay: true,
+    path: 'Assistant - Typing Right Thinking.json'
+  });
+
+  // Zoom controls
+  document.getElementById('zoom-in').addEventListener('click', () => map.zoomIn());
+  document.getElementById('zoom-out').addEventListener('click', () => map.zoomOut());
+
+  // Compass — reset bearing to north
+  const compassSvg = document.querySelector('.compass-btn svg');
+  map.on('rotate', () => {
+    compassSvg.style.transform = `rotate(${-map.getBearing()}deg)`;
+  });
+  document.getElementById('compass').addEventListener('click', () => {
+    map.easeTo({ bearing: 0, pitch: 0 });
+  });
+
+  // Map type switch
+  const btnSatellite = document.getElementById('btn-satellite');
+  const btnMap = document.getElementById('btn-map');
+
+  btnSatellite.addEventListener('click', () => {
+    if (btnSatellite.classList.contains('active')) return;
+    btnSatellite.classList.add('active');
+    btnMap.classList.remove('active');
+    map.setStyle(STYLE_SATELLITE);
+    map.once('style.load', addZCTALayer);
+  });
+
+  btnMap.addEventListener('click', () => {
+    if (btnMap.classList.contains('active')) return;
+    btnMap.classList.add('active');
+    btnSatellite.classList.remove('active');
+    map.setStyle(STYLE_MAP);
+    map.once('style.load', addZCTALayer);
+  });
+
+  // ── Chat Input States ──
+  const chatInputWrapper = document.querySelector('.chat-input-wrapper');
+  const chatInputEl = document.querySelector('.chat-input');
+  const chatText = document.getElementById('chat-text');
+
+  chatText.addEventListener('focus', () => {
+    chatInputWrapper.classList.add('active');
+    const chatPanel = document.getElementById('chat-panel');
+    const chatPanelMessages = document.getElementById('chat-panel-messages');
+    if (chatPanelMessages.children.length > 0 && !chatPanel.classList.contains('open') && !chatPanel.classList.contains('closing')) {
+      const pillsRow = document.getElementById('area-pills-row');
+      const pillsHeight = (pillsRow && pillsRow.children.length > 0) ? pillsRow.offsetHeight - 12 : 0;
+      chatPanel.style.bottom = (104 + pillsHeight) + 'px';
+      chatPanel.classList.add('open');
+    }
+  });
+
+  chatText.addEventListener('blur', () => {
+    if (!chatText.value.trim() && !chatPanel.classList.contains('open')) {
+      chatInputWrapper.classList.remove('active');
+    }
+  });
+
+  let activeCommand = null;
+  const chatInputBody = document.getElementById('chat-input-body');
+
+  function addCommandPill(command) {
+    // Remove existing command pill if any
+    removeCommandPill();
+    activeCommand = command;
+
+    const pill = document.createElement('span');
+    pill.className = 'command-pill';
+    pill.id = 'command-pill';
+    pill.innerHTML = `/${command}<button class="command-pill-close"><img src="Icons/close-x-icon.svg" width="6" height="6" alt="Remove"></button>`;
+
+    pill.querySelector('.command-pill-close').addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeCommandPill();
+      chatText.focus();
+    });
+
+    chatInputBody.insertBefore(pill, chatText);
+    chatText.placeholder = 'Enter address...';
+    chatText.value = '';
+    chatText.focus();
+  }
+
+  function removeCommandPill() {
+    activeCommand = null;
+    const existing = document.getElementById('command-pill');
+    if (existing) existing.remove();
+    chatText.placeholder = 'Give me complete evaluation of the 2004 El Camino Real corridor';
+  }
+
+  chatText.addEventListener('input', () => {
+    const val = chatText.value;
+    chatInputEl.classList.toggle('has-text', val.trim().length > 0 || activeCommand);
+
+    // Detect /address followed by space
+    if (!activeCommand && val.match(/^\/address\s$/i)) {
+      addCommandPill('address');
+      return;
+    }
+  });
+
+  // ── Draw Mode ──
+  const drawBtn = document.getElementById('draw-btn');
+  const drawCanvas = document.getElementById('draw-canvas');
+  const ctx = drawCanvas.getContext('2d');
+
+  let drawMode = false;
+  let isDrawing = false;
+  let drawPoints = [];
+  let areaCount = 0;
+  const areas = {};
+
+  function resizeCanvas() {
+    drawCanvas.width = window.innerWidth;
+    drawCanvas.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+
+  drawBtn.addEventListener('click', () => {
+    drawMode = !drawMode;
+    drawBtn.classList.toggle('active', drawMode);
+    drawCanvas.style.display = drawMode ? 'block' : 'none';
+
+    if (drawMode) {
+      map.boxZoom.disable();
+      map.scrollZoom.disable();
+      map.dragPan.disable();
+      map.dragRotate.disable();
+      map.doubleClickZoom.disable();
+      map.touchZoomRotate.disable();
+    } else {
+      map.boxZoom.enable();
+      map.scrollZoom.enable();
+      map.dragPan.enable();
+      map.dragRotate.enable();
+      map.doubleClickZoom.enable();
+      map.touchZoomRotate.enable();
+      ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+      drawPoints = [];
+    }
+  });
+
+  drawCanvas.addEventListener('mousedown', (e) => {
+    if (!drawMode) return;
+    isDrawing = true;
+    drawPoints = [{ x: e.clientX, y: e.clientY }];
+    ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+  });
+
+  drawCanvas.addEventListener('mousemove', (e) => {
+    if (!isDrawing) return;
+    drawPoints.push({ x: e.clientX, y: e.clientY });
+    renderDrawing();
+  });
+
+  drawCanvas.addEventListener('mouseup', () => {
+    if (!isDrawing) return;
+    isDrawing = false;
+
+    if (drawPoints.length < 10) {
+      ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+      drawPoints = [];
+      return;
+    }
+
+    // Check if shape is closed — start and end must be within 80px
+    const first = drawPoints[0];
+    const last = drawPoints[drawPoints.length - 1];
+    const dist = Math.sqrt((first.x - last.x) ** 2 + (first.y - last.y) ** 2);
+    if (dist > 80) {
+      ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+      drawPoints = [];
+      return;
+    }
+
+    // Close the shape and finalize
+    drawPoints.push(drawPoints[0]);
+    finishArea();
+  });
+
+  function renderDrawing() {
+    ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+    if (drawPoints.length < 2) return;
+
+    ctx.beginPath();
+    ctx.moveTo(drawPoints[0].x, drawPoints[0].y);
+    for (let i = 1; i < drawPoints.length; i++) {
+      ctx.lineTo(drawPoints[i].x, drawPoints[i].y);
+    }
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 4;
+    ctx.setLineDash([]);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.fill();
+  }
+
+  const areaSnapshots = {};
+  const areaStats = {};
+
+  function analyzeArea(areaId, coords, screenPoints) {
+    const polygon = turf.polygon([coords]);
+    const areaSqM = turf.area(polygon);
+    const areaSqFt = areaSqM * 10.7639;
+    const areaAcres = areaSqM / 4046.86;
+    const perimeterM = turf.length(turf.lineString(coords), { units: 'meters' });
+    const perimeterFt = perimeterM * 3.28084;
+
+    // Query buildings within the drawn polygon bounds
+    const xs = screenPoints.map(p => p.x);
+    const ys = screenPoints.map(p => p.y);
+    const bbox = [[Math.min(...xs), Math.min(...ys)], [Math.max(...xs), Math.max(...ys)]];
+
+    const buildingFeatures = map.queryRenderedFeatures(bbox, {
+      layers: map.getStyle().layers
+        .filter(l => l.id.match(/building/i))
+        .map(l => l.id)
+    });
+
+    // Filter buildings that actually intersect the polygon
+    let buildingCount = 0;
+    const seen = new Set();
+    buildingFeatures.forEach(f => {
+      const key = f.id || JSON.stringify(f.geometry.coordinates[0]?.[0]);
+      if (seen.has(key)) return;
+      seen.add(key);
+      try {
+        const center = turf.centroid(f);
+        if (turf.booleanPointInPolygon(center, polygon)) buildingCount++;
+      } catch(e) { }
+    });
+
+    // Query roads
+    const roadFeatures = map.queryRenderedFeatures(bbox, {
+      layers: map.getStyle().layers
+        .filter(l => l.id.match(/road|street/i) && l.type === 'line')
+        .map(l => l.id)
+    });
+    const roadSet = new Set();
+    roadFeatures.forEach(f => {
+      const name = f.properties?.name || f.properties?.ref;
+      if (name) roadSet.add(name);
+    });
+
+    // Query POIs (parks, transit)
+    const poiFeatures = map.queryRenderedFeatures(bbox, {
+      layers: map.getStyle().layers
+        .filter(l => l.id.match(/poi|park|transit/i))
+        .map(l => l.id)
+    });
+    const poiNames = new Set();
+    poiFeatures.forEach(f => {
+      const name = f.properties?.name;
+      if (name) {
+        try {
+          const pt = turf.centroid(f);
+          if (turf.booleanPointInPolygon(pt, polygon)) poiNames.add(name);
+        } catch(e) { }
+      }
+    });
+
+    const stats = {
+      areaSqFt: Math.round(areaSqFt).toLocaleString(),
+      areaAcres: areaAcres.toFixed(2),
+      perimeterFt: Math.round(perimeterFt).toLocaleString(),
+      buildingCount,
+      roads: Array.from(roadSet).slice(0, 5),
+      pois: Array.from(poiNames).slice(0, 5)
+    };
+
+    areaStats[areaId] = stats;
+    return stats;
+  }
+
+  function captureAreaSnapshot(points) {
+    const xs = points.map(p => p.x);
+    const ys = points.map(p => p.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+
+    const pad = 60;
+    const x = Math.max(0, minX - pad);
+    const y = Math.max(0, minY - pad);
+    const w = Math.min(window.innerWidth, maxX + pad) - x;
+    const h = Math.min(window.innerHeight, maxY + pad) - y;
+
+    const mapCanvas = map.getCanvas();
+    const snap = document.createElement('canvas');
+    snap.width = w * 2;
+    snap.height = h * 2;
+    const sCtx = snap.getContext('2d');
+    const ratio = mapCanvas.width / mapCanvas.clientWidth;
+    sCtx.drawImage(mapCanvas, x * ratio, y * ratio, w * ratio, h * ratio, 0, 0, w * 2, h * 2);
+
+    // Draw the polygon outline on top
+    sCtx.beginPath();
+    sCtx.moveTo((points[0].x - x) * 2, (points[0].y - y) * 2);
+    for (let i = 1; i < points.length; i++) {
+      sCtx.lineTo((points[i].x - x) * 2, (points[i].y - y) * 2);
+    }
+    sCtx.closePath();
+    sCtx.strokeStyle = '#FFFFFF';
+    sCtx.lineWidth = 4;
+    sCtx.stroke();
+    sCtx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    sCtx.fill();
+
+    return snap.toDataURL('image/jpeg', 0.85);
+  }
+
+  function finishArea() {
+    areaCount++;
+    const areaId = 'area-' + areaCount;
+
+    // Capture snapshot before converting coordinates
+    areaSnapshots[areaId] = captureAreaSnapshot(drawPoints);
+
+    // Convert screen points to lng/lat
+    const coords = drawPoints.map(p => {
+      const lngLat = map.unproject([p.x, p.y]);
+      return [lngLat.lng, lngLat.lat];
+    });
+
+    // Add polygon to map
+    addAreaToMap(areaId, coords);
+
+    // Analyze the area
+    analyzeArea(areaId, coords, drawPoints);
+
+    // Add pill to chat input
+    addAreaPill(areaId, areaCount);
+
+    // Exit draw mode
+    ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+    drawPoints = [];
+    drawMode = false;
+    drawBtn.classList.remove('active');
+    drawCanvas.style.display = 'none';
+    map.boxZoom.enable();
+    map.scrollZoom.enable();
+    map.dragPan.enable();
+    map.dragRotate.enable();
+    map.doubleClickZoom.enable();
+    map.touchZoomRotate.enable();
+  }
+
+  function addAreaToMap(id, coords) {
+    const sourceId = id + '-source';
+    const lineId = id + '-line';
+
+    const polygon = turf.polygon([coords]);
+    const area = turf.area(polygon);
+    const maxInset = Math.sqrt(area) * 0.15;
+    const steps = 30;
+
+    const buffers = [polygon];
+    for (let i = 1; i <= steps; i++) {
+      const dist = (maxInset / steps) * i;
+      const buffered = turf.buffer(polygon, -dist / 1000, { units: 'kilometers' });
+      if (buffered) buffers.push(buffered);
+    }
+
+    const fillIds = [];
+    for (let i = 0; i < buffers.length - 1; i++) {
+      const outer = buffers[i].geometry.coordinates[0];
+      const inner = buffers[i + 1].geometry.coordinates[0].slice().reverse();
+      const donut = turf.polygon([outer, inner]);
+      const opacity = 0.3 * ((buffers.length - 1 - i) / (buffers.length - 1));
+
+      const ringSourceId = id + '-ring-' + i;
+      const ringFillId = id + '-ringfill-' + i;
+
+      map.addSource(ringSourceId, {
+        type: 'geojson',
+        data: donut
+      });
+
+      map.addLayer({
+        id: ringFillId,
+        type: 'fill',
+        source: ringSourceId,
+        paint: {
+          'fill-color': '#FFFFFF',
+          'fill-opacity': opacity
+        }
+      });
+
+      fillIds.push({ sourceId: ringSourceId, fillId: ringFillId });
+    }
+
+    map.addSource(sourceId, {
+      type: 'geojson',
+      data: polygon
+    });
+
+    map.addLayer({
+      id: lineId,
+      type: 'line',
+      source: sourceId,
+      paint: {
+        'line-color': '#FFFFFF',
+        'line-width': 4
+      }
+    });
+
+    areas[id] = { sourceId, lineId, fillIds };
+  }
+
+  const areaPillsRow = document.getElementById('area-pills-row');
+
+  function addAreaPill(id, num) {
+    const pill = document.createElement('span');
+    pill.className = 'area-pill';
+    pill.dataset.areaId = id;
+    pill.innerHTML = `Area ${num}<button class="area-pill-close" title="Remove area"><img src="Icons/close-x-icon.svg" width="8" height="8" alt="Remove"></button>`;
+
+    pill.querySelector('.area-pill-close').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (activeAreaId === id) activeAreaId = null;
+      removeArea(id);
+      pill.remove();
+    });
+
+    pill.addEventListener('click', () => {
+      highlightArea(id);
+    });
+
+    pill.style.cursor = 'pointer';
+    areaPillsRow.appendChild(pill);
+  }
+
+  function removeArea(id) {
+    const area = areas[id];
+    if (!area) return;
+    if (map.getLayer(area.lineId)) map.removeLayer(area.lineId);
+    if (area.fillIds) {
+      area.fillIds.forEach(r => {
+        if (map.getLayer(r.fillId)) map.removeLayer(r.fillId);
+        if (map.getSource(r.sourceId)) map.removeSource(r.sourceId);
+      });
+    }
+    if (map.getSource(area.sourceId)) map.removeSource(area.sourceId);
+    delete areas[id];
+  }
+
+  let activeAreaId = null;
+
+  function setAreaColors(area, color, opacityScale) {
+    if (area.fillIds) {
+      const steps = area.fillIds.length;
+      area.fillIds.forEach((r, i) => {
+        map.setPaintProperty(r.fillId, 'fill-color', color);
+        map.setPaintProperty(r.fillId, 'fill-opacity', opacityScale * ((steps - 1 - i) / (steps - 1 || 1)));
+      });
+    }
+    map.setPaintProperty(area.lineId, 'line-color', color);
+  }
+
+  function highlightArea(id) {
+    if (activeAreaId && areas[activeAreaId]) {
+      setAreaColors(areas[activeAreaId], '#FFFFFF', 0.2);
+      document.querySelector(`.area-pill[data-area-id="${activeAreaId}"]`)?.classList.remove('selected');
+    }
+
+    if (activeAreaId === id) {
+      activeAreaId = null;
+      return;
+    }
+
+    activeAreaId = id;
+    const area = areas[id];
+    if (!area) return;
+
+    setAreaColors(area, '#6266E6', 0.3);
+    document.querySelector(`.area-pill[data-area-id="${id}"]`)?.classList.add('selected');
+
+    const source = map.getSource(area.sourceId);
+    const coords = source._data.geometry.coordinates[0];
+    const bounds = coords.reduce((b, c) => b.extend(c), new mapboxgl.LngLatBounds(coords[0], coords[0]));
+    map.fitBounds(bounds, { padding: 120, duration: 800 });
+  }
+
+  // Hide POIs except transit and parks
+  function filterPOIs() {
+    map.getStyle().layers.forEach(layer => {
+      if (layer.id.match(/poi/) && !layer.id.match(/transit|park/)) {
+        map.setLayoutProperty(layer.id, 'visibility', 'none');
+      }
+    });
+  }
+
+  map.on('style.load', filterPOIs);
+
+  // (ZCTA layer function defined above, near map creation)
+
+  // Re-add areas after style change
+  let savedAreas = {};
+
+  map.on('style.load', () => {
+    Object.entries(savedAreas).forEach(([id, data]) => {
+      addAreaToMap(id, data.coords);
+    });
+  });
+
+  const origAddAreaToMap = addAreaToMap;
+  addAreaToMap = function(id, coords) {
+    savedAreas[id] = { coords };
+    origAddAreaToMap(id, coords);
+  };
+
+  const origRemoveArea = removeArea;
+  removeArea = function(id) {
+    delete savedAreas[id];
+    origRemoveArea(id);
+  };
+
+  // ── Chat Panel ──
+  const chatPanel = document.getElementById('chat-panel');
+  const chatPanelMessages = document.getElementById('chat-panel-messages');
+  const chatSendBtn = document.querySelector('.chat-send');
+
+  const fakeResponses = [
+    {
+      heading: "3 undervalued parcels near the downtown corridor",
+      body: "I found three parcels within a half-mile radius that are currently assessed below the median for their zoning class. Lot 4421 on W. Julian St sits on 0.38 acres of C-2 commercial land and last traded in 2017 at $1.2M — comparable lots have since moved to $1.9M. The other two are adjacent infill sites on Autumn St with combined frontage of 140 ft, ideal for a mixed-use mid-rise given the recent general plan amendment allowing up to 8 stories."
+    },
+    {
+      heading: "Traffic pattern shift detected on El Camino Real",
+      body: "Average daily vehicle count on this segment dropped 14% over the past 18 months while pedestrian activity rose 22%, driven by the new light-rail stop at Benton Ave. Peak congestion has moved from 5:45 PM to 6:20 PM. Retailers on the east side of the block are reporting higher foot traffic, and two ground-floor vacancies were leased in Q1 — both to food-and-beverage tenants, which aligns with the walkability trend."
+    },
+    {
+      heading: "Flood risk re-evaluation for the selected zone",
+      body: "FEMA updated the preliminary flood maps in March and this parcel has been reclassified from Zone X to Zone AE, meaning a 1% annual chance of flooding. The base flood elevation is now set at 62 ft — the existing slab sits at 59.4 ft. Insurance premiums for structures in AE zones typically run $2,800–$4,500 per year. Elevation certificates from the two neighboring properties suggest a localized drainage issue that the city stormwater plan addresses in Phase 3, expected completion late 2027."
+    },
+    {
+      heading: "Permit activity surging in the south quadrant",
+      body: "Over the last 90 days, 34 building permits were filed within this boundary — up from an average of 11 per quarter. Twenty-one are residential ADU conversions, eight are tenant improvement permits for commercial spaces, and five are new construction. The largest filing is a 96-unit multifamily project on Bascom Ave with an estimated construction value of $28M. This level of activity often precedes a measurable uptick in assessed values within 12–18 months."
+    }
+  ];
+
+  let responseIndex = 0;
+
+  function addMessage(text, type, heading, snapshots) {
+    const msg = document.createElement('div');
+    msg.className = 'chat-msg fade-in';
+
+    if (type === 'assistant') {
+      const headingWords = heading.split(/\s+/);
+      const bodyWords = text.split(/\s+/);
+
+      const headingSpans = headingWords.map((w, i) => {
+        return `<span class="blur-word" style="transition-delay:${i * 70}ms">${w}</span>`;
+      }).join(' ');
+
+      let offset = headingWords.length;
+
+      // Build area details cards — one per area
+      let areaCardHTML = '';
+      if (snapshots && snapshots.length > 0) {
+        const allStats = Object.values(areaStats);
+        areaCardHTML = snapshots.map((src, cardIdx) => {
+          const s = allStats[cardIdx] || allStats[allStats.length - 1];
+          const delay = cardIdx * 200;
+          if (s) {
+            return `<div class="chat-area-card card-fade-in" style="animation-delay:${delay}ms">
+              <div class="chat-area-card-label">Area ${cardIdx + 1}</div>
+              <div class="chat-area-card-image"><img src="${src}" alt="Area snapshot"></div>
+              <div class="chat-area-card-stats">
+                <div class="chat-area-card-row">
+                  <div class="chat-area-card-stat">
+                    <div class="chat-area-card-stat-label">Area</div>
+                    <div class="chat-area-card-stat-value">${s.areaAcres} <span class="chat-area-card-stat-unit">acres</span></div>
+                  </div>
+                  <div class="chat-area-card-stat">
+                    <div class="chat-area-card-stat-label">Area size</div>
+                    <div class="chat-area-card-stat-value">${s.areaSqFt} <span class="chat-area-card-stat-unit">ft²</span></div>
+                  </div>
+                </div>
+                <div class="chat-area-card-row">
+                  <div class="chat-area-card-stat">
+                    <div class="chat-area-card-stat-label">Buildings</div>
+                    <div class="chat-area-card-stat-value">${s.buildingCount}</div>
+                  </div>
+                  <div class="chat-area-card-stat">
+                    <div class="chat-area-card-stat-label">Perimeter</div>
+                    <div class="chat-area-card-stat-value">${s.perimeterFt} <span class="chat-area-card-stat-unit">ft</span></div>
+                  </div>
+                </div>
+                ${s.roads.length > 0 || s.pois.length > 0 ? `<div class="chat-area-card-row">
+                  ${s.roads.length > 0 ? `<div class="chat-area-card-stat">
+                    <div class="chat-area-card-stat-label">Roads</div>
+                    <div class="chat-area-card-stat-value">${s.roads.length}</div>
+                  </div>` : ''}
+                  ${s.pois.length > 0 ? `<div class="chat-area-card-stat">
+                    <div class="chat-area-card-stat-label">Points of interest</div>
+                    <div class="chat-area-card-stat-value">${s.pois.length}</div>
+                  </div>` : ''}
+                </div>` : ''}
+              </div>
+            </div>`;
+          } else {
+            return `<div class="chat-area-card card-fade-in" style="animation-delay:${delay}ms">
+              <div class="chat-area-card-label">Area ${cardIdx + 1}</div>
+              <div class="chat-area-card-image"><img src="${src}" alt="Area snapshot"></div>
+            </div>`;
+          }
+        }).join('');
+      }
+
+      const bodySpans = bodyWords.map((w, i) => {
+        const delay = (offset + i) * 70;
+        return `<span class="blur-word" style="transition-delay:${delay}ms">${w}</span>`;
+      }).join(' ');
+
+      msg.innerHTML = `
+        <div class="chat-msg-avatar assistant"><img src="Icons/Geolava-assistant.png" alt="Assistant"></div>
+        <div class="chat-msg-body">
+          ${areaCardHTML}
+          <div class="chat-msg-heading">${headingSpans}</div>
+          <div class="chat-msg-text">${bodySpans}</div>
+        </div>
+      `;
+      chatPanelMessages.appendChild(msg);
+      chatPanelMessages.scrollTop = chatPanelMessages.scrollHeight;
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          msg.querySelectorAll('.blur-word').forEach(s => s.classList.add('in'));
+        });
+      });
+    } else {
+      const userSnapshotHTML = (snapshots && snapshots.length > 0)
+        ? snapshots.map(src => `<div class="chat-area-card-image" style="border-radius:10px;overflow:hidden"><img src="${src}" alt="Area snapshot"></div>`).join('')
+        : '';
+
+      msg.innerHTML = `
+        <div class="chat-msg-avatar user">V</div>
+        ${userSnapshotHTML}
+        <div class="chat-msg-text">${text}</div>
+      `;
+      chatPanelMessages.appendChild(msg);
+      chatPanelMessages.scrollTop = chatPanelMessages.scrollHeight;
+    }
+
+    return msg;
+  }
+
+  function addTypingIndicator() {
+    const msg = document.createElement('div');
+    msg.className = 'chat-msg';
+    msg.id = 'typing-indicator';
+    msg.innerHTML = `
+      <div class="chat-msg-avatar assistant"><img src="Icons/Geolava-assistant.png" alt="Assistant"></div>
+      <div class="chat-msg-bubble">
+        <div class="chat-msg-sender">Geolava</div>
+        <div class="chat-typing">
+          <div class="chat-typing-dot"></div>
+          <div class="chat-typing-dot"></div>
+          <div class="chat-typing-dot"></div>
+        </div>
+      </div>
+    `;
+    chatPanelMessages.appendChild(msg);
+    chatPanelMessages.scrollTop = chatPanelMessages.scrollHeight;
+  }
+
+  function removeTypingIndicator() {
+    const el = document.getElementById('typing-indicator');
+    if (el) el.remove();
+  }
+
+  function sendMessage(text) {
+    if (!text.trim()) return;
+
+    // Collect area pills, their snapshots, and stats
+    const pills = areaPillsRow.querySelectorAll('.area-pill');
+    const snapshots = [];
+    const collectedStats = [];
+    let fullText = text;
+    if (pills.length > 0) {
+      const areaNames = [];
+      pills.forEach(p => {
+        const id = p.dataset.areaId;
+        areaNames.push(p.childNodes[0].textContent.trim());
+        if (areaSnapshots[id]) snapshots.push(areaSnapshots[id]);
+        if (areaStats[id]) collectedStats.push(areaStats[id]);
+      });
+      fullText = areaNames.join(', ') + ' — ' + text;
+    }
+
+    addMessage(fullText, 'user', null, snapshots);
+
+    // Show panel, keep input visible — adjust for pills row height
+    const pillsRow = document.getElementById('area-pills-row');
+    const pillsHeight = (pillsRow && pillsRow.children.length > 0) ? pillsRow.offsetHeight - 12 : 0;
+    chatPanel.style.bottom = (104 + pillsHeight) + 'px';
+    chatPanel.classList.add('open');
+    chatInputWrapper.classList.add('active');
+
+    // Simulate typing delay then respond
+    addTypingIndicator();
+    setTimeout(() => {
+      removeTypingIndicator();
+
+      if (collectedStats.length > 0) {
+        const s = collectedStats[0];
+        const heading = `Area analysis — ${s.areaAcres} acres, ${s.buildingCount} buildings`;
+        const roadsText = s.roads.length > 0
+          ? `The area is served by ${s.roads.slice(0, 3).join(', ')}${s.roads.length > 3 ? ' and ' + (s.roads.length - 3) + ' other roads' : ''}.`
+          : '';
+        const poisText = s.pois.length > 0
+          ? ` Nearby points of interest include ${s.pois.join(', ')}.`
+          : '';
+        const body = `The selected area covers ${s.areaSqFt} sq ft (${s.areaAcres} acres) with a perimeter of ${s.perimeterFt} ft. Within this boundary there are approximately ${s.buildingCount} building footprints detected from satellite imagery. ${roadsText}${poisText} Current zoning allows for mixed-use development with an estimated FAR utilization of ${(40 + Math.random() * 35).toFixed(0)}%, suggesting significant remaining development capacity.`;
+
+        addMessage(body, 'assistant', heading, snapshots);
+      } else {
+        const response = fakeResponses[responseIndex % fakeResponses.length];
+        responseIndex++;
+        addMessage(response.body, 'assistant', response.heading);
+      }
+    }, 1500 + Math.random() * 1000);
+  }
+
+  // ── Address Geocoding ──
+  async function geocodeAddress(address) {
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json?access_token=${mapboxgl.accessToken}&limit=1`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.features && data.features.length > 0) {
+      return data.features[0];
+    }
+    return null;
+  }
+
+  function clearAddressHighlight() {
+    if (map.getLayer('address-building-fill')) map.removeLayer('address-building-fill');
+    if (map.getLayer('address-building-line')) map.removeLayer('address-building-line');
+    if (map.getSource('address-building')) map.removeSource('address-building');
+    if (map.getLayer('address-zcta-fill')) map.removeLayer('address-zcta-fill');
+    if (map.getLayer('address-zcta-line')) map.removeLayer('address-zcta-line');
+    if (map.getSource('address-zcta')) map.removeSource('address-zcta');
+    if (window._addressMarker) { window._addressMarker.remove(); window._addressMarker = null; }
+  }
+
+  function highlightZCTAat(lng, lat) {
+    // Query ZCTA features at the point
+    const point = map.project([lng, lat]);
+    const features = map.queryRenderedFeatures(point, { layers: ['zcta-borders'] });
+
+    if (features.length === 0) return;
+
+    const zcta = features[0];
+    const zcCode = zcta.properties.ZCTA5CE20;
+
+    // Highlight this zip code area
+    if (map.getLayer('address-zcta-fill')) map.removeLayer('address-zcta-fill');
+    if (map.getLayer('address-zcta-line')) map.removeLayer('address-zcta-line');
+    if (map.getSource('address-zcta')) map.removeSource('address-zcta');
+
+    map.addSource('address-zcta', {
+      type: 'geojson',
+      data: zcta
+    });
+
+    map.addLayer({
+      id: 'address-zcta-fill',
+      type: 'fill',
+      source: 'address-zcta',
+      paint: {
+        'fill-color': '#6266E6',
+        'fill-opacity': 0.08
+      }
+    });
+
+    map.addLayer({
+      id: 'address-zcta-line',
+      type: 'line',
+      source: 'address-zcta',
+      paint: {
+        'line-color': '#6266E6',
+        'line-width': 3,
+        'line-opacity': 0.7
+      }
+    });
+
+    return zcCode;
+  }
+
+  function highlightBuildingAt(lng, lat) {
+    // Clear only building highlight (not zcta or marker)
+    if (map.getLayer('address-building-fill')) map.removeLayer('address-building-fill');
+    if (map.getLayer('address-building-line')) map.removeLayer('address-building-line');
+    if (map.getSource('address-building')) map.removeSource('address-building');
+
+    // Query building features at the point
+    const point = map.project([lng, lat]);
+    const radius = 30;
+    const buildingLayers = map.getStyle().layers.filter(l => l.id.match(/building/i)).map(l => l.id);
+    let features = [];
+    if (buildingLayers.length > 0) {
+      features = map.queryRenderedFeatures(
+        [[point.x - radius, point.y - radius], [point.x + radius, point.y + radius]],
+        { layers: buildingLayers }
+      );
+    }
+    if (features.length === 0) {
+      // Try without layer filter as fallback
+      features = map.queryRenderedFeatures(
+        [[point.x - radius, point.y - radius], [point.x + radius, point.y + radius]]
+      ).filter(f => f.sourceLayer && f.sourceLayer.match(/building/i));
+    }
+
+    if (features.length === 0) return;
+
+    // Find the closest building
+    const targetPoint = turf.point([lng, lat]);
+    let closest = features[0];
+    let closestDist = Infinity;
+    features.forEach(f => {
+      if (f.geometry) {
+        const center = turf.centroid(f);
+        const dist = turf.distance(targetPoint, center);
+        if (dist < closestDist) {
+          closestDist = dist;
+          closest = f;
+        }
+      }
+    });
+
+    if (!closest.geometry) return;
+
+    map.addSource('address-building', {
+      type: 'geojson',
+      data: closest
+    });
+
+    map.addLayer({
+      id: 'address-building-fill',
+      type: 'fill',
+      source: 'address-building',
+      paint: {
+        'fill-color': '#6266E6',
+        'fill-opacity': 0.25
+      }
+    });
+
+    map.addLayer({
+      id: 'address-building-line',
+      type: 'line',
+      source: 'address-building',
+      paint: {
+        'line-color': '#6266E6',
+        'line-width': 2.5
+      }
+    });
+  }
+
+  function flyToAddress(feature) {
+    const [lng, lat] = feature.center;
+
+    clearAddressHighlight();
+
+    // Add marker
+    window._addressMarker = new mapboxgl.Marker({ color: '#6266E6' })
+      .setLngLat([lng, lat])
+      .addTo(map);
+
+    map.flyTo({
+      center: [lng, lat],
+      zoom: 17,
+      duration: 1500,
+      pitch: 45
+    });
+
+    // Highlight building and zip code after map settles
+    map.once('moveend', () => {
+      setTimeout(() => {
+        highlightBuildingAt(lng, lat);
+        highlightZCTAat(lng, lat);
+      }, 300);
+    });
+  }
+
+  async function handleInput(text) {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    // Active command mode (pill is shown)
+    if (activeCommand === 'address') {
+      const address = trimmed;
+      chatInputEl.classList.remove('has-text');
+      const feature = await geocodeAddress(address);
+      if (feature) {
+        flyToAddress(feature);
+      }
+      // Keep address mode and text, but collapse input
+      chatText.blur();
+      chatInputWrapper.classList.remove('active');
+      return;
+    }
+
+    // Chat mode: "show me address {address}"
+    const showMatch = trimmed.match(/^show\s+me\s+(?:the\s+)?address\s+(.+)/i);
+    if (showMatch) {
+      const address = showMatch[1];
+      chatText.value = '';
+      chatInputEl.classList.remove('has-text');
+      chatInputWrapper.classList.add('active');
+
+      addMessage(trimmed, 'user');
+
+      const pillsRow = document.getElementById('area-pills-row');
+      const pillsHeight = (pillsRow && pillsRow.children.length > 0) ? pillsRow.offsetHeight - 12 : 0;
+      chatPanel.style.bottom = (104 + pillsHeight) + 'px';
+      chatPanel.classList.add('open');
+
+      addTypingIndicator();
+
+      const feature = await geocodeAddress(address);
+      removeTypingIndicator();
+
+      if (feature) {
+        flyToAddress(feature);
+        const placeName = feature.place_name || address;
+        const placeType = (feature.place_type || ['location']).join(', ');
+        const [lng, lat] = feature.center;
+        const heading = placeName;
+        const body = `Found "${address}" at coordinates ${lat.toFixed(5)}, ${lng.toFixed(5)}. This location is classified as a ${placeType}. The map has been centered on this address with a detailed satellite view. You can draw an area around the property to get a full evaluation including building footprints, lot size, and nearby infrastructure.`;
+        addMessage(body, 'assistant', heading);
+      } else {
+        addMessage(`Sorry, I couldn't find an address matching "${address}". Try a more specific address with city and state.`, 'assistant', 'Address not found');
+      }
+      return;
+    }
+
+    // Regular message
+    sendMessage(trimmed);
+    chatText.value = '';
+    chatInputEl.classList.remove('has-text');
+    chatInputWrapper.classList.add('active');
+    chatText.focus();
+  }
+
+  // Send from main input
+  chatSendBtn.addEventListener('click', () => {
+    handleInput(chatText.value);
+    chatText.focus();
+  });
+
+  chatText.addEventListener('keydown', (e) => {
+    // Backspace on empty input removes command pill
+    if (e.key === 'Backspace' && activeCommand && chatText.value === '') {
+      e.preventDefault();
+      removeCommandPill();
+      return;
+    }
+    if (e.key === 'Enter' && chatText.value.trim()) {
+      handleInput(chatText.value);
+    }
+  });
+
+  // Close panel
+  document.getElementById('chat-panel-close').addEventListener('click', () => {
+    chatPanel.classList.add('closing');
+
+    chatPanel.addEventListener('animationend', function handler() {
+      chatPanel.removeEventListener('animationend', handler);
+      chatPanel.classList.remove('open', 'closing');
+      chatInputWrapper.classList.remove('active');
+      chatText.blur();
+    });
+  });
+
+  // ── Quick Ask (C key) ──
+  const quickAskPopup = document.getElementById('quick-ask-popup');
+  const quickAskDot = document.getElementById('quick-ask-dot');
+  const quickAskInput = document.getElementById('quick-ask-input');
+  const quickAskInputWrap = document.getElementById('quick-ask-input-wrap');
+  const quickAskSend = document.getElementById('quick-ask-send');
+  let quickAskOpen = false;
+  let quickAskLottieAnim = null;
+  let cursorX = 0, cursorY = 0;
+
+  // Track cursor position
+  document.addEventListener('mousemove', (e) => {
+    cursorX = e.clientX;
+    cursorY = e.clientY;
+  });
+
+  function openQuickAsk() {
+    if (quickAskOpen) return;
+    quickAskOpen = true;
+
+    // Show dot at cursor
+    quickAskDot.style.left = (cursorX - 6) + 'px';
+    quickAskDot.style.top = (cursorY - 6) + 'px';
+    quickAskDot.classList.add('active');
+
+    // Position popup so dot is below bottom-left corner with margin
+    quickAskPopup.style.left = (cursorX - 6) + 'px';
+    quickAskPopup.classList.remove('visible');
+    quickAskPopup.style.visibility = 'hidden';
+    quickAskPopup.style.display = 'flex';
+    const popupHeight = quickAskPopup.offsetHeight;
+    quickAskPopup.style.top = (cursorY - popupHeight - 16) + 'px';
+    quickAskPopup.style.display = '';
+    quickAskPopup.style.visibility = '';
+
+    quickAskPopup.classList.add('visible');
+
+    // Load lottie if not loaded
+    if (!quickAskLottieAnim) {
+      quickAskLottieAnim = lottie.loadAnimation({
+        container: document.getElementById('quick-ask-lottie'),
+        renderer: 'svg',
+        loop: true,
+        autoplay: true,
+        path: 'Assistant - Typing Right Thinking.json'
+      });
+    } else {
+      quickAskLottieAnim.play();
+    }
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        quickAskPopup.classList.add('active');
+        quickAskInput.focus();
+      });
+    });
+  }
+
+  function closeQuickAsk() {
+    if (!quickAskOpen) return;
+    quickAskPopup.classList.remove('active');
+    quickAskDot.classList.remove('active');
+    setTimeout(() => {
+      quickAskPopup.classList.remove('visible');
+      quickAskInput.value = '';
+      quickAskInputWrap.classList.remove('has-text');
+      quickAskOpen = false;
+      if (quickAskLottieAnim) quickAskLottieAnim.pause();
+    }, 250);
+  }
+
+  function quickAskSubmit() {
+    const text = quickAskInput.value.trim();
+    if (!text) return;
+
+    // Get input position for flying animation
+    const inputRect = quickAskInput.getBoundingClientRect();
+    const flyEl = document.createElement('div');
+    flyEl.className = 'quick-ask-flying';
+    flyEl.textContent = text;
+    flyEl.style.left = inputRect.left + 'px';
+    flyEl.style.top = inputRect.top + 'px';
+    document.body.appendChild(flyEl);
+
+    // Close popup
+    quickAskPopup.classList.remove('active');
+    quickAskDot.classList.remove('active');
+    setTimeout(() => {
+      quickAskPopup.classList.remove('visible');
+      quickAskInput.value = '';
+      quickAskInputWrap.classList.remove('has-text');
+      quickAskOpen = false;
+      if (quickAskLottieAnim) quickAskLottieAnim.pause();
+    }, 150);
+
+    // Calculate target — the chat input position
+    const chatInputRect = chatInputWrapper.getBoundingClientRect();
+    const targetX = chatInputRect.left + 60;
+    const targetY = chatInputRect.top + chatInputRect.height / 2 - 10;
+
+    requestAnimationFrame(() => {
+      flyEl.style.left = targetX + 'px';
+      flyEl.style.top = targetY + 'px';
+      flyEl.classList.add('fly');
+    });
+
+    // After flying, send the message
+    setTimeout(() => {
+      flyEl.remove();
+      sendMessage(text);
+      chatInputWrapper.classList.add('active');
+    }, 600);
+  }
+
+  // "C" key opens quick ask, Escape closes
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && quickAskOpen) {
+      e.preventDefault();
+      closeQuickAsk();
+      return;
+    }
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if ((e.key === 'c' || e.key === 'C') && !quickAskOpen) {
+      e.preventDefault();
+      openQuickAsk();
+    }
+  });
+
+  // Click outside to close
+  document.addEventListener('mousedown', (e) => {
+    if (quickAskOpen && !quickAskPopup.contains(e.target)) {
+      closeQuickAsk();
+    }
+  });
+
+  // Input events
+  quickAskInput.addEventListener('input', () => {
+    quickAskInputWrap.classList.toggle('has-text', quickAskInput.value.trim().length > 0);
+  });
+
+  quickAskSend.addEventListener('click', quickAskSubmit);
+
+  quickAskInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && quickAskInput.value.trim()) {
+      quickAskSubmit();
+    }
+  });
+</script>
+
+</body>
+</html>
